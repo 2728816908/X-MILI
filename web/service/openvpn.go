@@ -13,11 +13,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
+	"github.com/mhsanaei/3x-ui/v2/logger"
 )
 
 const (
@@ -41,10 +43,13 @@ type OpenVPNStatus struct {
 
 type openVPNTask struct {
 	sync.Mutex
-	id     int64
-	cancel context.CancelFunc
-	cmd    *exec.Cmd
-	status OpenVPNStatus
+	id                int64
+	cancel            context.CancelFunc
+	cmd               *exec.Cmd
+	status            OpenVPNStatus
+	ruleMode          string
+	selectedCountries []string
+	favoriteFallback  bool
 }
 
 var vpnGateOpenVPN = &openVPNTask{
@@ -55,7 +60,7 @@ var vpnGateOpenVPN = &openVPNTask{
 	},
 }
 
-func (s *OpenVPNService) StartVPNGate(server VPNGateServer) (*OpenVPNStatus, error) {
+func (s *OpenVPNService) StartVPNGate(server VPNGateServer, ruleMode string, selectedCountries []string, favoriteFallback bool) (*OpenVPNStatus, error) {
 	if server.OpenVPNConfig == "" {
 		return nil, errors.New("OpenVPN config is empty")
 	}
@@ -66,6 +71,9 @@ func (s *OpenVPNService) StartVPNGate(server VPNGateServer) (*OpenVPNStatus, err
 	vpnGateOpenVPN.id++
 	taskID := vpnGateOpenVPN.id
 	vpnGateOpenVPN.cancel = cancel
+	vpnGateOpenVPN.ruleMode = ruleMode
+	vpnGateOpenVPN.selectedCountries = selectedCountries
+	vpnGateOpenVPN.favoriteFallback = favoriteFallback
 	vpnGateOpenVPN.status = OpenVPNStatus{
 		Phase:    "installing",
 		Progress: 8,
@@ -168,10 +176,17 @@ func (s *OpenVPNService) connectVPNGate(ctx context.Context, taskID int64, serve
 			vpnGateOpenVPN.setTask(taskID, "canceled", 0, "已取消")
 			return
 		case err := <-done:
-			if err == nil {
-				vpnGateOpenVPN.fail(taskID, "OpenVPN 已退出")
+			vpnGateOpenVPN.Lock()
+			phase := vpnGateOpenVPN.status.Phase
+			vpnGateOpenVPN.Unlock()
+			if phase == "connected" {
+				go triggerVPNGateFailover(taskID)
 			} else {
-				vpnGateOpenVPN.fail(taskID, err.Error())
+				if err == nil {
+					vpnGateOpenVPN.fail(taskID, "OpenVPN 已退出")
+				} else {
+					vpnGateOpenVPN.fail(taskID, err.Error())
+				}
 			}
 			return
 		case <-deadline:
@@ -190,6 +205,11 @@ func (s *OpenVPNService) connectVPNGate(ctx context.Context, taskID int64, serve
 					return
 				}
 				outbound := buildVPNGateOutbound(tunIP)
+				if err := updateXrayVPNGateOutbound(outbound); err != nil {
+					vpnGateOpenVPN.fail(taskID, fmt.Sprintf("Xray配置更新失败: %v", err))
+					return
+				}
+
 				vpnGateOpenVPN.Lock()
 				if vpnGateOpenVPN.id != taskID {
 					vpnGateOpenVPN.Unlock()
@@ -212,12 +232,22 @@ func (s *OpenVPNService) connectVPNGate(ctx context.Context, taskID int64, serve
 
 				go func() {
 					err := <-done
-					msg := "OpenVPN 已断开"
-					if err != nil {
-						msg += ": " + err.Error()
+					vpnGateOpenVPN.Lock()
+					phase := vpnGateOpenVPN.status.Phase
+					vpnGateOpenVPN.Unlock()
+					if phase == "connected" {
+						go triggerVPNGateFailover(taskID)
+					} else {
+						msg := "OpenVPN 已断开"
+						if err != nil {
+							msg += ": " + err.Error()
+						}
+						vpnGateOpenVPN.fail(taskID, msg)
 					}
-					vpnGateOpenVPN.fail(taskID, msg)
 				}()
+
+				// Spawn network watchdog checker
+				go startNetworkChecker(ctx, taskID, tunIP, tunDev)
 				return
 			}
 			if writer.contains("AUTH_FAILED") {
@@ -538,4 +568,243 @@ func (w *openVPNLogWriter) contains(text string) bool {
 	w.Lock()
 	defer w.Unlock()
 	return strings.Contains(w.all, text)
+}
+
+func startNetworkChecker(ctx context.Context, taskID int64, tunIP, tunDev string) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	failCount := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			vpnGateOpenVPN.Lock()
+			currentID := vpnGateOpenVPN.id
+			phase := vpnGateOpenVPN.status.Phase
+			vpnGateOpenVPN.Unlock()
+
+			if currentID != taskID || phase != "connected" {
+				return
+			}
+
+			// Perform health check: ping 8.8.8.8 through the tun interface
+			cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "3", "-I", tunDev, "8.8.8.8")
+			if err := cmd.Run(); err != nil {
+				failCount++
+				logger.Warningf("[VPNGate Watchdog] Ping test failed on %s (count %d): %v", tunDev, failCount, err)
+			} else {
+				failCount = 0
+			}
+
+			if failCount >= 3 {
+				logger.Errorf("[VPNGate Watchdog] VPNGate connection on %s is dead. Triggering auto-failover...", tunDev)
+				go triggerVPNGateFailover(taskID)
+				return
+			}
+		}
+	}
+}
+
+func triggerVPNGateFailover(taskID int64) {
+	vpnGateOpenVPN.Lock()
+	if vpnGateOpenVPN.id != taskID {
+		vpnGateOpenVPN.Unlock()
+		return
+	}
+	ruleMode := vpnGateOpenVPN.ruleMode
+	selectedCountries := vpnGateOpenVPN.selectedCountries
+	favoriteFallback := vpnGateOpenVPN.favoriteFallback
+	currentServer := vpnGateOpenVPN.status.Server
+
+	if ruleMode == "" {
+		vpnGateOpenVPN.fail(taskID, "VPNGate 连接断开，且无后备过滤规则")
+		vpnGateOpenVPN.Unlock()
+		return
+	}
+
+	vpnGateOpenVPN.stopLocked()
+	vpnGateOpenVPN.status.Phase = "connecting"
+	vpnGateOpenVPN.status.Message = "检测到节点失效，正在自动选择后备节点"
+	vpnGateOpenVPN.status.Progress = 50
+	vpnGateOpenVPN.Unlock()
+
+	// 1. Fetch fresh list of servers
+	vpngateService := &VPNGateService{}
+	servers, err := vpngateService.ListServers(true)
+	if err != nil {
+		vpnGateOpenVPN.fail(taskID, fmt.Sprintf("自动候补失败: 无法获取节点列表 (%v)", err))
+		return
+	}
+
+	// Load favorites from settings DB
+	settingService := &SettingService{}
+	favStr, err := settingService.GetVPNGateFavorites()
+	if err != nil {
+		favStr = "[]"
+	}
+	var favorites []string
+	_ = json.Unmarshal([]byte(favStr), &favorites)
+
+	// 2. Filter servers based on ruleMode & selectedCountries
+	var pool []VPNGateServer
+	if ruleMode == "fixed" {
+		for _, s := range servers {
+			if containsString(selectedCountries, s.CountryShort) {
+				pool = append(pool, s)
+			}
+		}
+	} else if ruleMode == "dynamic" {
+		for _, s := range servers {
+			if containsString(selectedCountries, s.CountryShort) {
+				pool = append(pool, s)
+			}
+		}
+		if len(pool) == 0 {
+			pool = servers
+		}
+	} else if ruleMode == "favorite" {
+		for _, s := range servers {
+			if containsString(favorites, s.HostName) {
+				pool = append(pool, s)
+			}
+		}
+		if len(pool) == 0 {
+			if favoriteFallback {
+				pool = servers
+			} else {
+				vpnGateOpenVPN.fail(taskID, "所有收藏节点均已失效且关闭了候补")
+				return
+			}
+		}
+	} else {
+		pool = servers
+	}
+
+	// Filter out the failed server IP
+	var candidates []VPNGateServer
+	if currentServer != nil {
+		for _, s := range pool {
+			if s.IP != currentServer.IP {
+				candidates = append(candidates, s)
+			}
+		}
+	} else {
+		candidates = pool
+	}
+
+	if len(candidates) == 0 {
+		if ruleMode == "favorite" && favoriteFallback && len(pool) < len(servers) {
+			for _, s := range servers {
+				if currentServer == nil || s.IP != currentServer.IP {
+					candidates = append(candidates, s)
+				}
+			}
+		}
+	}
+
+	if len(candidates) == 0 {
+		vpnGateOpenVPN.fail(taskID, "自动候补失败: 无可用后备节点")
+		return
+	}
+
+	// 3. Sort by ping Rank (lowest ping first)
+	sort.Slice(candidates, func(i, j int) bool {
+		pi := candidates[i].LocalPing
+		pj := candidates[j].LocalPing
+		if pi < 0 {
+			pi = 999999
+		}
+		if pj < 0 {
+			pj = 999999
+		}
+		return pi < pj
+	})
+
+	best := candidates[0]
+
+	vpnGateOpenVPN.Lock()
+	if vpnGateOpenVPN.id != taskID {
+		vpnGateOpenVPN.Unlock()
+		return
+	}
+	vpnGateOpenVPN.status.Server = &best
+	vpnGateOpenVPN.status.Message = fmt.Sprintf("正在尝试连接候补节点 [%s - %s]", best.CountryLong, best.IP)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	vpnGateOpenVPN.cancel = cancel
+	vpnGateOpenVPN.Unlock()
+
+	openvpnService := &OpenVPNService{}
+	go openvpnService.connectVPNGate(ctx, taskID, best)
+}
+
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+func updateXrayVPNGateOutbound(outbound map[string]any) error {
+	settingService := &SettingService{}
+	xraySettingService := &XraySettingService{}
+	xrayService := &XrayService{}
+
+	// 1. Get template config
+	templateConfig, err := settingService.GetXrayConfigTemplate()
+	if err != nil {
+		return err
+	}
+
+	// 2. Parse config JSON
+	var configMap map[string]any
+	if err := json.Unmarshal([]byte(templateConfig), &configMap); err != nil {
+		return err
+	}
+
+	// 3. Find and update outbound with tag "vpngate"
+	outboundsVal, ok := configMap["outbounds"]
+	if !ok {
+		return fmt.Errorf("outbounds key not found in template config")
+	}
+	outbounds, ok := outboundsVal.([]any)
+	if !ok {
+		return fmt.Errorf("outbounds is not an array")
+	}
+
+	found := false
+	for i, o := range outbounds {
+		oMap, ok := o.(map[string]any)
+		if !ok {
+			continue
+		}
+		if tag, ok := oMap["tag"].(string); ok && tag == vpnGateOutboundTag {
+			outbounds[i] = outbound
+			found = true
+			break
+		}
+	}
+	if !found {
+		outbounds = append(outbounds, outbound)
+	}
+	configMap["outbounds"] = outbounds
+
+	// 4. Serialize back
+	newConfigBytes, err := json.MarshalIndent(configMap, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// 5. Save settings
+	if err := xraySettingService.SaveXraySetting(string(newConfigBytes)); err != nil {
+		return err
+	}
+
+	// 6. Restart Xray
+	return xrayService.RestartXray(true)
 }

@@ -74,6 +74,8 @@ var defaultValueMap = map[string]string{
 	"restartXrayOnClientDisable":  "true",
 	"xrayOutboundTestUrl":         "https://www.google.com/generate_204",
 	"warp":                        "",
+	"vpngateRefreshInterval":      "120",
+	"vpngateFavorites":            "[]",
 }
 
 // SettingService provides business logic for application settings management.
@@ -260,6 +262,22 @@ func (s *SettingService) GetWarp() (string, error) {
 
 func (s *SettingService) SetWarp(data string) error {
 	return s.setString("warp", data)
+}
+
+func (s *SettingService) GetVPNGateRefreshInterval() (int, error) {
+	return s.getInt("vpngateRefreshInterval")
+}
+
+func (s *SettingService) SetVPNGateRefreshInterval(value int) error {
+	return s.setInt("vpngateRefreshInterval", value)
+}
+
+func (s *SettingService) GetVPNGateFavorites() (string, error) {
+	return s.getString("vpngateFavorites")
+}
+
+func (s *SettingService) SetVPNGateFavorites(value string) error {
+	return s.setString("vpngateFavorites", value)
 }
 
 func (s *SettingService) GetListen() (string, error) {

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"strconv"
 
 	"github.com/mhsanaei/3x-ui/v2/util/common"
 	"github.com/mhsanaei/3x-ui/v2/web/service"
@@ -164,8 +165,43 @@ func (a *XraySettingController) vpngate(c *gin.Context) {
 		var server service.VPNGateServer
 		err = json.Unmarshal([]byte(c.PostForm("server")), &server)
 		if err == nil {
-			resp, err = a.OpenVPNService.StartVPNGate(server)
+			ruleMode := c.PostForm("ruleMode")
+			var selectedCountries []string
+			_ = json.Unmarshal([]byte(c.PostForm("selectedCountries")), &selectedCountries)
+			favoriteFallback := c.PostForm("favoriteFallback") == "true"
+			resp, err = a.OpenVPNService.StartVPNGate(server, ruleMode, selectedCountries, favoriteFallback)
 		}
+	case "get_settings":
+		interval, errVal := a.SettingService.GetVPNGateRefreshInterval()
+		if errVal != nil {
+			interval = 120
+		}
+		favStr, errVal := a.SettingService.GetVPNGateFavorites()
+		if errVal != nil {
+			favStr = "[]"
+		}
+		var favorites []string
+		_ = json.Unmarshal([]byte(favStr), &favorites)
+		resp = map[string]any{
+			"favorites":       favorites,
+			"refreshInterval": interval,
+		}
+	case "save_settings":
+		intervalStr := c.PostForm("refreshInterval")
+		interval, errVal := strconv.Atoi(intervalStr)
+		if errVal != nil || interval < 15 || interval > 4320 {
+			interval = 120
+		}
+		favoritesStr := c.PostForm("favorites")
+		var favorites []string
+		if errVal := json.Unmarshal([]byte(favoritesStr), &favorites); errVal != nil {
+			favoritesStr = "[]"
+		}
+		err = a.SettingService.SetVPNGateRefreshInterval(interval)
+		if err == nil {
+			err = a.SettingService.SetVPNGateFavorites(favoritesStr)
+		}
+		resp = map[string]any{"success": err == nil}
 	case "status":
 		status := a.OpenVPNService.VPNGateStatus()
 		resp = &status

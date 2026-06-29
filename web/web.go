@@ -304,6 +304,16 @@ func (s *Server) startTask() {
 	// Check whether xray is running every second
 	s.cron.AddJob("@every 1s", job.NewCheckXrayRunningJob())
 
+	// Check and refresh VPNGate nodes periodically
+	s.cron.AddFunc("@every 1m", func() {
+		settingService := &service.SettingService{}
+		interval, err := settingService.GetVPNGateRefreshInterval()
+		if err != nil || interval < 15 {
+			interval = 120
+		}
+		service.CheckAndRefreshVPNGate(interval)
+	})
+
 	// Check if xray needs to be restarted every 30 seconds
 	s.cron.AddFunc("@every 30s", func() {
 		if s.xrayService.IsNeedRestartAndSetFalse() {

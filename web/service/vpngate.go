@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mhsanaei/3x-ui/v2/logger"
 )
 
 type VPNGateService struct{}
@@ -87,6 +89,10 @@ func (s *VPNGateService) ListServers(refresh bool) ([]VPNGateServer, error) {
 	}
 	vpnGateCache.servers = limitVPNGateServers(servers, vpnGateMaxServers)
 	vpnGateCache.expires = time.Now().Add(vpnGateCacheTTL)
+
+	lastFetchTimeMutex.Lock()
+	lastFetchTime = time.Now()
+	lastFetchTimeMutex.Unlock()
 
 	return cloneVPNGateServers(vpnGateCache.servers), nil
 }
@@ -396,4 +402,33 @@ func determineVPNGateIPType(hosting bool, isp, org string) string {
 		}
 	}
 	return "住宅IP"
+}
+
+var (
+	lastFetchTime      time.Time
+	lastFetchTimeMutex sync.Mutex
+)
+
+func CheckAndRefreshVPNGate(intervalMinutes int) {
+	lastFetchTimeMutex.Lock()
+	defer lastFetchTimeMutex.Unlock()
+
+	// Initial load if lastFetchTime is zero
+	if lastFetchTime.IsZero() || time.Since(lastFetchTime) >= time.Duration(intervalMinutes)*time.Minute {
+		lastFetchTime = time.Now() // Set immediately to prevent duplicate runs
+		// Fetch in the background so we do not block the cron scheduler
+		go func() {
+			logger.Info("[VPNGate] Background periodic node fetching started...")
+			vpngateService := &VPNGateService{}
+			_, err := vpngateService.ListServers(true) // force refresh and cache
+			if err != nil {
+				logger.Errorf("[VPNGate] Background periodic node fetch failed: %v", err)
+				lastFetchTimeMutex.Lock()
+				lastFetchTime = time.Time{} // reset on failure to retry on next check
+				lastFetchTimeMutex.Unlock()
+			} else {
+				logger.Info("[VPNGate] Background periodic node fetch completed successfully.")
+			}
+		}()
+	}
 }

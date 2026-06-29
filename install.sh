@@ -286,7 +286,6 @@ chmod +x DockerInit.sh
 ./DockerInit.sh "$(detect_arch)"
 
 cp -r build/* "$INSTALL_DIR/"
-install -m 755 x-ui.sh /usr/bin/x-ui
 install -m 755 x-ui.sh /usr/bin/ml
 echo "$X_MILI_LANG" > "$LANG_FILE"
 
@@ -296,3 +295,8 @@ print_install_guide
 
 is_zh && log "安装完成。命令：ml" || log "Done. Command: ml"
 is_zh && warn "默认数据目录仍为 ${DATA_DIR}，用于兼容旧数据。" || warn "Data directory remains ${DATA_DIR} for compatibility."
+
+if [[ "$panel_credentials_initialized" == "1" ]]; then
+    # Actively open the menu for the first installation
+    /usr/bin/ml
+fi

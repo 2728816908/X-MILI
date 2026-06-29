@@ -202,10 +202,21 @@ func (s *OpenVPNService) connectVPNGate(ctx context.Context, taskID int64, serve
 				vpnGateOpenVPN.status.TunDev = tunDev
 				vpnGateOpenVPN.status.Outbound = outbound
 				vpnGateOpenVPN.Unlock()
+
+				writer.Lock()
+				writer.closed = true
+				writer.buf = ""
+				writer.linesBuf = nil
+				writer.all = ""
+				writer.Unlock()
+
 				go func() {
-					if err := <-done; err != nil {
-						vpnGateOpenVPN.fail(taskID, "OpenVPN 已断开: "+err.Error())
+					err := <-done
+					msg := "OpenVPN 已断开"
+					if err != nil {
+						msg += ": " + err.Error()
 					}
+					vpnGateOpenVPN.fail(taskID, msg)
 				}()
 				return
 			}
@@ -252,13 +263,13 @@ func sanitizeVPNGateOpenVPNConfig(base64Config string) (string, error) {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "<") {
-			inInline = !strings.HasPrefix(lower, "</")
+		if strings.HasPrefix(lower, "</") {
+			inInline = false
 			out = append(out, line)
 			continue
 		}
-		if strings.HasPrefix(lower, "</") {
-			inInline = false
+		if strings.HasPrefix(lower, "<") {
+			inInline = true
 			out = append(out, line)
 			continue
 		}
@@ -323,7 +334,7 @@ func runCommand(ctx context.Context, name string, args ...string) error {
 }
 
 func listOpenVPNTun() (map[string]string, error) {
-	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "scope", "global").Output()
+	out, err := exec.Command("ip", "-o", "-4", "addr", "show").Output()
 	if err != nil {
 		return nil, err
 	}
@@ -337,8 +348,13 @@ func listOpenVPNTun() (map[string]string, error) {
 		if !strings.HasPrefix(dev, "tun") && !strings.HasPrefix(dev, "tap") {
 			continue
 		}
-		ip, _, err := net.ParseCIDR(fields[3])
-		if err == nil && ip.To4() != nil {
+		var ip net.IP
+		if strings.Contains(fields[3], "/") {
+			ip, _, _ = net.ParseCIDR(fields[3])
+		} else {
+			ip = net.ParseIP(fields[3])
+		}
+		if ip != nil && ip.To4() != nil {
 			tuns[dev] = ip.String()
 		}
 	}
@@ -365,11 +381,6 @@ func detectOpenVPNTun(before map[string]string) (string, string, error) {
 func chooseOpenVPNTun(before, after map[string]string) (string, string, bool) {
 	for dev, ip := range after {
 		if oldIP, ok := before[dev]; !ok || oldIP != ip {
-			return ip, dev, true
-		}
-	}
-	if len(after) == 1 {
-		for dev, ip := range after {
 			return ip, dev, true
 		}
 	}
@@ -436,6 +447,8 @@ func (t *openVPNTask) fail(taskID int64, message string) {
 	t.status.Message = message
 	t.status.Error = message
 	t.status.Outbound = nil
+	t.status.TunIP = ""
+	t.status.TunDev = ""
 }
 
 func (t *openVPNTask) stopLocked() {
@@ -488,11 +501,15 @@ type openVPNLogWriter struct {
 	buf      string
 	linesBuf []string
 	all      string
+	closed   bool
 }
 
 func (w *openVPNLogWriter) Write(p []byte) (int, error) {
 	w.Lock()
 	defer w.Unlock()
+	if w.closed {
+		return len(p), nil
+	}
 	w.buf += string(p)
 	for {
 		i := strings.IndexByte(w.buf, '\n')

@@ -86,12 +86,12 @@ func TestBuildVPNGateOutbound(t *testing.T) {
 	}
 }
 
-func TestChooseOpenVPNTunAcceptsReusedSingleTun(t *testing.T) {
-	ip, dev, ok := chooseOpenVPNTun(
+func TestChooseOpenVPNTunRejectsReusedSingleTun(t *testing.T) {
+	_, _, ok := chooseOpenVPNTun(
 		map[string]string{"tun0": "10.8.0.2"},
 		map[string]string{"tun0": "10.8.0.2"},
 	)
-	if !ok || ip != "10.8.0.2" || dev != "tun0" {
-		t.Fatalf("unexpected tun: %s %s %v", ip, dev, ok)
+	if ok {
+		t.Fatalf("expected tun to be rejected because it is reused with the same IP")
 	}
 }

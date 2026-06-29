@@ -152,11 +152,18 @@
             message: '',
         },
         statusTimer: null,
+        app: null,
         show() {
             this.visible = true;
+            if (this.app) {
+                this.app.initModal();
+            }
         },
         close() {
             this.visible = false;
+            if (this.app) {
+                this.app.stopStatusTimer();
+            }
         },
         loading(loading = true) {
             this.confirmLoading = loading;
@@ -168,6 +175,9 @@
         el: '#vpngate-modal',
         data: {
             vpngateModal: vpngateModal,
+        },
+        created() {
+            vpngateModal.app = this;
         },
         computed: {
             countryOptions() {
@@ -182,8 +192,11 @@
                 return Array.from(countries.values()).sort((a, b) => a.label.localeCompare(b.label));
             },
             selectedServers() {
-                if (vpngateModal.ruleMode === 'default' || vpngateModal.selectedCountries.length === 0) {
+                if (vpngateModal.ruleMode === 'default') {
                     return vpngateModal.servers;
+                }
+                if (vpngateModal.selectedCountries.length === 0) {
+                    return [];
                 }
                 return vpngateModal.servers.filter(server => vpngateModal.selectedCountries.includes(server.countryShort));
             },
@@ -270,8 +283,9 @@
                 vpngateModal.connectStatus = status || { phase: 'idle', progress: 0, message: '' };
             },
             startStatusTimer() {
-                this.stopStatusTimer();
-                vpngateModal.statusTimer = setInterval(() => this.refreshConnectStatus(), 1200);
+                if (!vpngateModal.statusTimer) {
+                    vpngateModal.statusTimer = setInterval(() => this.refreshConnectStatus(), 1200);
+                }
             },
             stopStatusTimer() {
                 if (vpngateModal.statusTimer) {
@@ -279,17 +293,26 @@
                     vpngateModal.statusTimer = null;
                 }
             },
+            initModal() {
+                this.create();
+                this.refreshConnectStatus();
+            },
             async refreshConnectStatus() {
                 const msg = await HttpUtil.post('/panel/xray/vpngate/status');
                 if (!msg.success) return;
+                const oldPhase = vpngateModal.connectStatus.phase;
                 this.setConnectStatus(msg.obj);
                 if (msg.obj.phase === 'connected') {
-                    this.stopStatusTimer();
-                    this.upsertVPNGateOutbound(msg.obj.outbound);
+                    if (oldPhase !== 'connected') {
+                        this.upsertVPNGateOutbound(msg.obj.outbound);
+                        Vue.prototype.$message.success('VPNGate 已连接，已填入 vpngate 出站，请保存 Xray 配置');
+                    }
                     vpngateModal.loading(false);
-                    Vue.prototype.$message.success('VPNGate 已连接，已填入 vpngate 出站，请保存 Xray 配置');
                 }
-                if (['failed', 'canceled'].includes(msg.obj.phase)) {
+                if (['installing', 'preparing', 'connecting', 'connected'].includes(msg.obj.phase)) {
+                    this.startStatusTimer();
+                }
+                if (['failed', 'canceled', 'idle'].includes(msg.obj.phase)) {
                     this.stopStatusTimer();
                     vpngateModal.loading(false);
                 }

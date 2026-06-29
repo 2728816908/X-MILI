@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -24,9 +26,11 @@ import (
 type VPNGateService struct{}
 
 const (
-	vpnGateAPIURL     = "https://www.vpngate.net/api/iphone/"
-	vpnGateCacheTTL   = 5 * time.Minute
-	vpnGateMaxServers = 100
+	vpnGateAPIURL              = "https://www.vpngate.net/api/iphone/"
+	vpnGateCacheTTL            = 5 * time.Minute
+	vpnGateMaxServers          = 100
+	vpnGateOpenVPNCheckLimit   = 40
+	vpnGateOpenVPNCheckWorkers = 3
 )
 
 type VPNGateServer struct {
@@ -133,6 +137,10 @@ func loadVPNGateServers() ([]VPNGateServer, error) {
 		servers[i].ISP = info.ISP
 		servers[i].ASN = info.ASN
 		servers[i].IPType = info.IPType
+	}
+
+	if commandExists("openvpn") {
+		servers = limitVPNGateServers(servers, vpnGateOpenVPNCheckLimit)
 	}
 
 	servers = checkVPNGateServers(servers)
@@ -310,7 +318,11 @@ func fetchVPNGateIPData(ips []string) map[string]vpnGateIPInfo {
 func checkVPNGateServers(servers []VPNGateServer) []VPNGateServer {
 	tasks := make(chan int, len(servers))
 	results := make(chan vpnGateCheckResult, len(servers))
+	useOpenVPNCheck := commandExists("openvpn")
 	workers := 30
+	if useOpenVPNCheck {
+		workers = vpnGateOpenVPNCheckWorkers
+	}
 	if len(servers) < workers {
 		workers = len(servers)
 	}
@@ -320,7 +332,9 @@ func checkVPNGateServers(servers []VPNGateServer) []VPNGateServer {
 				server := servers[index]
 				ping := pingVPNGateIP(server.IP)
 				alive := ping >= 0
-				if server.Proto == "tcp" && server.Port != "" {
+				if useOpenVPNCheck {
+					alive = testVPNGateOpenVPN(server)
+				} else if server.Proto == "tcp" && server.Port != "" {
 					alive = testVPNGateTCP(server.IP, server.Port)
 				}
 				results <- vpnGateCheckResult{index: index, localPing: ping, isAlive: alive}
@@ -354,6 +368,62 @@ func testVPNGateTCP(ip, port string) bool {
 	}
 	conn.Close()
 	return true
+}
+
+func testVPNGateOpenVPN(server VPNGateServer) bool {
+	ovpn, err := sanitizeVPNGateOpenVPNConfig(server.OpenVPNConfig)
+	if err != nil || !commandExists("openvpn") {
+		return false
+	}
+
+	tmp, err := os.CreateTemp("", "vpngate-check-*.ovpn")
+	if err != nil {
+		return false
+	}
+	configPath := tmp.Name()
+	defer os.Remove(configPath)
+	if _, err := tmp.WriteString(ovpn); err != nil {
+		tmp.Close()
+		return false
+	}
+	if err := tmp.Close(); err != nil {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
+	defer cancel()
+
+	writer := &openVPNLogWriter{}
+	cmd := exec.CommandContext(ctx, "openvpn", "--config", configPath, "--route-nopull", "--auth-nocache", "--verb", "3", "--connect-retry-max", "1", "--connect-timeout", "8")
+	cmd.Stdout = writer
+	cmd.Stderr = writer
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if writer.contains("Initialization Sequence Completed") {
+				cancel()
+				<-done
+				return true
+			}
+		case <-done:
+			return writer.contains("Initialization Sequence Completed")
+		case <-ctx.Done():
+			<-done
+			return false
+		}
+	}
 }
 
 func pingVPNGateIP(ip string) int64 {

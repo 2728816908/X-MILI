@@ -10,11 +10,6 @@
                             @change="themeSwitcher.toggleTheme()"></a-switch>
                         <span>{{ i18n "menu.dark" }}</span>
                     </a-space>
-                    <a-space v-if="themeSwitcher.isDarkTheme" direction="horizontal" size="small">
-                        <a-checkbox :checked="themeSwitcher.isUltra"
-                            @click="themeSwitcher.toggleUltra()"></a-checkbox>
-                        <span>{{ i18n "menu.ultraDark" }}</span>
-                    </a-space>
                 </a-space>
             </template>
         </a-setting-list-item>
@@ -80,6 +75,13 @@
             <template #description>{{ i18n "pages.settings.pageSizeDesc" }}</template>
             <template #control>
                 <a-input-number :min="0" step="5" v-model="allSetting.pageSize" :style="{ width: '100%' }"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>安全提醒开关</template>
+            <template #description>打开后显示 TLS、默认端口、默认路径等安全提醒；默认关闭。</template>
+            <template #control>
+                <a-switch v-model="allSetting.securityAlertsEnable"></a-switch>
             </template>
         </a-setting-list-item>
         <a-setting-list-item paddings="small">

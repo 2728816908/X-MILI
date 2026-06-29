@@ -30,11 +30,12 @@ type AllSetting struct {
 	SessionMaxAge int    `json:"sessionMaxAge" form:"sessionMaxAge"` // Session maximum age in minutes
 
 	// UI settings
-	PageSize    int    `json:"pageSize" form:"pageSize"`       // Number of items per page in lists
-	ExpireDiff  int    `json:"expireDiff" form:"expireDiff"`   // Expiration warning threshold in days
-	TrafficDiff int    `json:"trafficDiff" form:"trafficDiff"` // Traffic warning threshold percentage
-	RemarkModel string `json:"remarkModel" form:"remarkModel"` // Remark model pattern for inbounds
-	Datepicker  string `json:"datepicker" form:"datepicker"`   // Date picker format
+	PageSize             int    `json:"pageSize" form:"pageSize"`                         // Number of items per page in lists
+	ExpireDiff           int    `json:"expireDiff" form:"expireDiff"`                     // Expiration warning threshold in days
+	TrafficDiff          int    `json:"trafficDiff" form:"trafficDiff"`                   // Traffic warning threshold percentage
+	SecurityAlertsEnable bool   `json:"securityAlertsEnable" form:"securityAlertsEnable"` // Show panel security warnings
+	RemarkModel          string `json:"remarkModel" form:"remarkModel"`                   // Remark model pattern for inbounds
+	Datepicker           string `json:"datepicker" form:"datepicker"`                     // Date picker format
 
 	// Security settings
 	TimeLocation    string `json:"timeLocation" form:"timeLocation"`       // Time zone location

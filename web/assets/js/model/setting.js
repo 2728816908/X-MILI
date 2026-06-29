@@ -11,6 +11,7 @@ class AllSetting {
         this.pageSize = 25;
         this.expireDiff = 0;
         this.trafficDiff = 0;
+        this.securityAlertsEnable = false;
         this.remarkModel = "-ieo";
         this.datepicker = "gregorian";
         this.twoFactorEnable = false;

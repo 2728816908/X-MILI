@@ -79,14 +79,16 @@ func (a *XraySettingController) getXraySetting(c *gin.Context) {
 		clientReverseTags = "[]"
 	}
 	outboundTestUrl, _ := a.SettingService.GetXrayOutboundTestUrl()
-	if outboundTestUrl == "" {
-		outboundTestUrl = "https://www.google.com/generate_204"
+	if outboundTestUrl == "" || outboundTestUrl == "https://www.google.com/generate_204" {
+		outboundTestUrl = service.DefaultXrayOutboundTestURL
 	}
+	securityAlertsEnable, _ := a.SettingService.GetSecurityAlertsEnable()
 	xrayResponse := map[string]any{
-		"xraySetting":       json.RawMessage(xraySetting),
-		"inboundTags":       json.RawMessage(inboundTags),
-		"clientReverseTags": json.RawMessage(clientReverseTags),
-		"outboundTestUrl":   outboundTestUrl,
+		"xraySetting":          json.RawMessage(xraySetting),
+		"inboundTags":          json.RawMessage(inboundTags),
+		"clientReverseTags":    json.RawMessage(clientReverseTags),
+		"outboundTestUrl":      outboundTestUrl,
+		"securityAlertsEnable": securityAlertsEnable,
 	}
 	result, err := json.Marshal(xrayResponse)
 	if err != nil {
@@ -105,7 +107,7 @@ func (a *XraySettingController) updateSetting(c *gin.Context) {
 	}
 	outboundTestUrl := c.PostForm("outboundTestUrl")
 	if outboundTestUrl == "" {
-		outboundTestUrl = "https://www.google.com/generate_204"
+		outboundTestUrl = service.DefaultXrayOutboundTestURL
 	}
 	_ = a.SettingService.SetXrayOutboundTestUrl(outboundTestUrl)
 	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), nil)

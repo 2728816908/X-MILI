@@ -86,6 +86,12 @@ func TestBuildVPNGateOutbound(t *testing.T) {
 	}
 }
 
+func TestVPNGateOpenVPNCheckRejectsBadConfig(t *testing.T) {
+	if testVPNGateOpenVPN(VPNGateServer{OpenVPNConfig: "bad"}) {
+		t.Fatalf("bad OpenVPN config was accepted")
+	}
+}
+
 func TestNormalizeVPNGateRuleMode(t *testing.T) {
 	if got := normalizeVPNGateRuleMode("fixed"); got != "fixed" {
 		t.Fatalf("got %q", got)

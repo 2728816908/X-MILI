@@ -130,7 +130,7 @@ type TestOutboundResult struct {
 // Only the test inbound and a route rule (to the tested outbound tag) are added.
 func (s *OutboundService) TestOutbound(outboundJSON string, testURL string, allOutboundsJSON string) (*TestOutboundResult, error) {
 	if testURL == "" {
-		testURL = "https://www.google.com/generate_204"
+		testURL = DefaultXrayOutboundTestURL
 	}
 
 	// Limit to one concurrent test at a time

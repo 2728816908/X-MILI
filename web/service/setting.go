@@ -24,6 +24,8 @@ import (
 //go:embed config.json
 var xrayTemplateConfig string
 
+const DefaultXrayOutboundTestURL = "https://cp.cloudflare.com/generate_204"
+
 var defaultValueMap = map[string]string{
 	"xrayTemplateConfig":          xrayTemplateConfig,
 	"webListen":                   "",
@@ -37,6 +39,7 @@ var defaultValueMap = map[string]string{
 	"pageSize":                    "25",
 	"expireDiff":                  "0",
 	"trafficDiff":                 "0",
+	"securityAlertsEnable":        "false",
 	"remarkModel":                 "-ieo",
 	"timeLocation":                "Local",
 	"twoFactorEnable":             "false",
@@ -72,7 +75,7 @@ var defaultValueMap = map[string]string{
 	"externalTrafficInformEnable": "false",
 	"externalTrafficInformURI":    "",
 	"restartXrayOnClientDisable":  "true",
-	"xrayOutboundTestUrl":         "https://www.google.com/generate_204",
+	"xrayOutboundTestUrl":         DefaultXrayOutboundTestURL,
 	"warp":                        "",
 	"vpngateRefreshInterval":      "120",
 	"vpngateFavorites":            "[]",
@@ -257,6 +260,10 @@ func (s *SettingService) GetXrayOutboundTestUrl() (string, error) {
 
 func (s *SettingService) SetXrayOutboundTestUrl(url string) error {
 	return s.setString("xrayOutboundTestUrl", url)
+}
+
+func (s *SettingService) GetSecurityAlertsEnable() (bool, error) {
+	return s.getBool("securityAlertsEnable")
 }
 
 func (s *SettingService) GetWarp() (string, error) {

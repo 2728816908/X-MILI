@@ -124,6 +124,57 @@ extract_setting() {
     echo "$info" | awk -v k="${key}:" '$1 == k {print $2; exit}'
 }
 
+read_panel_port() {
+    local current_port="${1:-2053}"
+    while true; do
+        if is_zh; then
+            read -rp "请设置面板端口 [默认 ${current_port}]: " panel_port
+        else
+            read -rp "Please set panel port [default ${current_port}]: " panel_port
+        fi
+        panel_port="${panel_port:-$current_port}"
+        if [[ "$panel_port" =~ ^[0-9]+$ ]] && ((panel_port >= 1 && panel_port <= 65535)); then
+            return
+        fi
+        is_zh && warn "端口必须是 1-65535" || warn "Port must be 1-65535"
+    done
+}
+
+read_initial_panel_settings() {
+    local info current_port
+    info=$("${INSTALL_DIR}/x-ui" setting -show true 2>/dev/null || true)
+    current_port=$(extract_setting "$info" "port")
+    current_port="${current_port:-2053}"
+
+    panel_username="${X_MILI_USERNAME:-}"
+    panel_password="${X_MILI_PASSWORD:-}"
+    panel_web_path="${X_MILI_WEB_BASE_PATH:-}"
+    panel_port="${X_MILI_PANEL_PORT:-}"
+
+    if [[ -t 0 ]]; then
+        echo ""
+        if is_zh; then
+            echo -e "${green}请设置初始面板信息，直接回车则随机生成。${plain}"
+            read -rp "用户名 [随机]: " panel_username
+            read -rp "密码 [随机]: " panel_password
+            read -rp "访问路径 [随机]: " panel_web_path
+        else
+            echo -e "${green}Set initial panel info. Press Enter to generate random values.${plain}"
+            read -rp "Username [random]: " panel_username
+            read -rp "Password [random]: " panel_password
+            read -rp "Web base path [random]: " panel_web_path
+        fi
+        if [[ -z "${X_MILI_PANEL_PORT:-}" ]]; then
+            read_panel_port "$current_port"
+        fi
+    fi
+
+    panel_username="${panel_username:-$(gen_random_string 10)}"
+    panel_password="${panel_password:-$(gen_random_string 18)}"
+    panel_web_path="${panel_web_path:-$(gen_random_string 18)}"
+    panel_port="${panel_port:-$current_port}"
+}
+
 panel_needs_initialization() {
     local info
     info=$("${INSTALL_DIR}/x-ui" setting -show true 2>/dev/null || true)
@@ -134,17 +185,16 @@ panel_needs_initialization() {
 init_panel_settings() {
     panel_credentials_initialized=0
     if panel_needs_initialization; then
-        panel_username="${X_MILI_USERNAME:-$(gen_random_string 10)}"
-        panel_password="${X_MILI_PASSWORD:-$(gen_random_string 18)}"
-        panel_web_path="${X_MILI_WEB_BASE_PATH:-$(gen_random_string 18)}"
+        read_initial_panel_settings
 
         "${INSTALL_DIR}/x-ui" setting \
             -username "$panel_username" \
             -password "$panel_password" \
+            -port "$panel_port" \
             -resetTwoFactor true >/dev/null 2>&1
         "${INSTALL_DIR}/x-ui" setting -webBasePath "$panel_web_path" >/dev/null 2>&1
         panel_credentials_initialized=1
-        is_zh && log "已生成随机面板账号、密码和访问路径" || log "Generated random panel username, password and web path"
+        is_zh && log "已设置初始面板账号、密码、端口和访问路径" || log "Initial panel username, password, port and web path configured"
     else
         is_zh && log "检测到已有非默认面板账号，保留现有登录信息" || log "Existing non-default panel account detected, keeping current login"
     fi

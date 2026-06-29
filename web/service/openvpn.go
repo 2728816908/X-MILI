@@ -346,16 +346,34 @@ func listOpenVPNTun() (map[string]string, error) {
 }
 
 func detectOpenVPNTun(before map[string]string) (string, string, error) {
-	after, err := listOpenVPNTun()
-	if err != nil {
-		return "", "", err
-	}
-	for dev, ip := range after {
-		if oldIP, ok := before[dev]; !ok || oldIP != ip {
+	var lastErr error
+	for i := 0; i < 12; i++ {
+		after, err := listOpenVPNTun()
+		if err != nil {
+			lastErr = err
+		} else if ip, dev, ok := chooseOpenVPNTun(before, after); ok {
 			return ip, dev, nil
 		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return "", "", lastErr
 	}
 	return "", "", errors.New("未找到 OpenVPN tun IPv4 地址")
+}
+
+func chooseOpenVPNTun(before, after map[string]string) (string, string, bool) {
+	for dev, ip := range after {
+		if oldIP, ok := before[dev]; !ok || oldIP != ip {
+			return ip, dev, true
+		}
+	}
+	if len(after) == 1 {
+		for dev, ip := range after {
+			return ip, dev, true
+		}
+	}
+	return "", "", false
 }
 
 func setupOpenVPNPolicyRoute(tunIP, tunDev string) error {

@@ -85,3 +85,13 @@ func TestBuildVPNGateOutbound(t *testing.T) {
 		t.Fatalf("unexpected outbound: %+v", outbound)
 	}
 }
+
+func TestChooseOpenVPNTunAcceptsReusedSingleTun(t *testing.T) {
+	ip, dev, ok := chooseOpenVPNTun(
+		map[string]string{"tun0": "10.8.0.2"},
+		map[string]string{"tun0": "10.8.0.2"},
+	)
+	if !ok || ip != "10.8.0.2" || dev != "tun0" {
+		t.Fatalf("unexpected tun: %s %s %v", ip, dev, ok)
+	}
+}

@@ -182,12 +182,16 @@ legacy_version() {
 
 # Function to handle the deletion of the script file
 delete_script() {
-    rm "$0" # Remove the script file itself
-    exit 1
+    rm -f /usr/bin/ml /usr/bin/x-ui
+    exit 0
 }
 
 uninstall() {
-    confirm "Are you sure you want to uninstall the panel? xray will also uninstalled!" "n"
+    if is_zh; then
+        confirm "确定要卸载面板吗？Xray 也会一起卸载！" "n"
+    else
+        confirm "Are you sure you want to uninstall the panel? xray will also uninstalled!" "n"
+    fi
     if [[ $? != 0 ]]; then
         if [[ $# == 0 ]]; then
             show_menu
@@ -196,12 +200,12 @@ uninstall() {
     fi
 
     if [[ $release == "alpine" ]]; then
-        rc-service x-ui stop
-        rc-update del x-ui
+        rc-service x-ui stop 2> /dev/null || true
+        rc-update del x-ui 2> /dev/null || true
         rm /etc/init.d/x-ui -f
     else
-        systemctl stop x-ui
-        systemctl disable x-ui
+        systemctl stop x-ui 2> /dev/null || true
+        systemctl disable x-ui 2> /dev/null || true
         rm ${xui_service}/x-ui.service -f
         systemctl daemon-reload
         systemctl reset-failed
@@ -209,12 +213,17 @@ uninstall() {
 
     rm /etc/x-ui/ -rf
     rm ${xui_folder}/ -rf
+    rm -f /usr/bin/ml /usr/bin/x-ui
 
     echo ""
-    echo -e "Uninstalled Successfully.\n"
-    echo "Reinstall with: bash <(curl -Ls ${repo_raw_base}/install.sh)"
+    if is_zh; then
+        echo -e "卸载完成。\n"
+        echo "重新安装: bash <(curl -Ls ${repo_raw_base}/install.sh)"
+    else
+        echo -e "Uninstalled Successfully.\n"
+        echo "Reinstall with: bash <(curl -Ls ${repo_raw_base}/install.sh)"
+    fi
     echo ""
-    # Trap the SIGTERM signal
     trap delete_script SIGTERM
     delete_script
 }
@@ -713,7 +722,7 @@ check_uninstall() {
     check_status
     if [[ $? != 2 ]]; then
         echo ""
-        LOGE "Panel installed, Please do not reinstall"
+        is_zh && LOGE "面板已安装，请不要重复安装" || LOGE "Panel installed, Please do not reinstall"
         if [[ $# == 0 ]]; then
             before_show_menu
         fi
@@ -727,7 +736,7 @@ check_install() {
     check_status
     if [[ $? == 2 ]]; then
         echo ""
-        LOGE "Please install the panel first"
+        is_zh && LOGE "请先安装面板" || LOGE "Please install the panel first"
         if [[ $# == 0 ]]; then
             before_show_menu
         fi
@@ -2440,7 +2449,7 @@ show_menu() {
             check_install && legacy_version
             ;;
         5)
-            check_install && uninstall
+            uninstall
             ;;
         6)
             check_install && reset_user
@@ -2553,7 +2562,7 @@ if [[ $# > 0 ]]; then
             check_uninstall 0 && install 0
             ;;
         "uninstall")
-            check_install 0 && uninstall 0
+            uninstall 0
             ;;
         "update-all-geofiles")
             check_install 0 && update_all_geofiles 0 && restart 0

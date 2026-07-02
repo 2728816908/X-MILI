@@ -57,8 +57,14 @@ download_prebuilt_bundle() {
     if ! curl -fL "$url" -o "$tmp_dir/package.tar.gz"; then
         return 1
     fi
-    tar -xzf "$tmp_dir/package.tar.gz" -C "$package_dir"
-    [[ -x "$package_dir/x-ui" && -f "$package_dir/x-ui.sh" ]] || return 1
+    if ! tar -xzf "$tmp_dir/package.tar.gz" -C "$package_dir"; then
+        warn "预编译包解压失败"
+        return 1
+    fi
+    if [[ ! -x "$package_dir/x-ui" || ! -f "$package_dir/x-ui.sh" || ! -d "$package_dir/bin" ]]; then
+        warn "预编译包不完整：缺少 x-ui、x-ui.sh 或 bin/"
+        return 1
+    fi
     package_commit="$(cat "$package_dir/.x-mili-commit" 2>/dev/null || true)"
     [[ -z "$remote_commit" || -z "$package_commit" || "$package_commit" == "$remote_commit" ]] || return 1
     return 0

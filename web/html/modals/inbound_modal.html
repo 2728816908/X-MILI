@@ -11,7 +11,7 @@
             <a-form-item label="类型">
                 <a-select v-model="simpleInboundType" @change="applySimpleInbound">
                     <a-select-option value="vless-reality">VLESS (Reality)</a-select-option>
-                    <a-select-option value="vmess-ws">VMess (WebSocket)</a-select-option>
+                    <a-select-option value="vless-ws">VLESS (WebSocket)</a-select-option>
                     <a-select-option value="mixed">Mixed</a-select-option>
                 </a-select>
             </a-form-item>
@@ -28,9 +28,9 @@
                 </a-form-item>
             </template>
 
-            <template v-if="simpleInboundType === 'vmess-ws'">
+            <template v-if="simpleInboundType === 'vless-ws'">
                 <a-form-item label="伪装域名">
-                    <a-input v-model.trim="simpleVmessDomain" placeholder="example.com"></a-input>
+                    <a-input v-model.trim="simpleWsDomain" placeholder="example.com"></a-input>
                 </a-form-item>
                 <a-form-item label="证书">
                     <div class="simple-cert-actions">
@@ -280,7 +280,7 @@
                     this.inbound.stream.reality.serverNames = host.replace(/:\d+$/, "");
                 },
             },
-            simpleVmessDomain: {
+            simpleWsDomain: {
                 get() {
                     return this.inbound.stream.ws.host || this.inbound.stream.tls.sni;
                 },
@@ -348,8 +348,8 @@
                     this.inbound.stream.reality.settings.publicKey = msg.obj.publicKey;
                 }
 
-                if (this.simpleInboundType === "vmess-ws" &&
-                    (!this.simpleVmessDomain || !this.simpleVmessCertReady())) {
+                if (this.simpleInboundType === "vless-ws" &&
+                    (!this.simpleWsDomain || !this.simpleWsCertReady())) {
                     this.$message.warning("请填写伪装域名、证书和私钥");
                     return false;
                 }
@@ -358,7 +358,7 @@
             },
             applySimpleInbound(type) {
                 this.simpleInboundType = type;
-                const port = this.inbound.port || RandomUtil.randomInteger(10000, 60000);
+                const port = type === "vless-ws" ? 2053 : (this.inbound.port || RandomUtil.randomInteger(10000, 60000));
                 inModal.inbound = new Inbound(port);
 
                 if (type === "vless-reality") {
@@ -370,11 +370,13 @@
                     return;
                 }
 
-                if (type === "vmess-ws") {
-                    inModal.inbound.protocol = Protocols.VMESS;
+                if (type === "vless-ws") {
+                    inModal.inbound.protocol = Protocols.VLESS;
                     inModal.inbound.stream.network = "ws";
                     inModal.inbound.stream.security = "tls";
                     inModal.inbound.stream.ws.path = "/ws";
+                    inModal.inbound.stream.tls.sni = this.simpleWsDomain;
+                    inModal.inbound.stream.ws.host = this.simpleWsDomain;
                     inModal.inbound.stream.tls.certs[0].useFile = false;
                     return;
                 }
@@ -382,9 +384,14 @@
                 inModal.inbound.protocol = Protocols.MIXED;
             },
             randomPort() {
+                if (this.simpleInboundType === "vless-ws") {
+                    const ports = [443, 2053, 2083, 2087, 2096, 8443];
+                    this.inbound.port = ports[RandomUtil.randomInteger(0, ports.length - 1)];
+                    return;
+                }
                 this.inbound.port = RandomUtil.randomInteger(10000, 60000);
             },
-            simpleVmessCertReady() {
+            simpleWsCertReady() {
                 const cert = this.inbound.stream.tls.certs[0];
                 return cert.useFile ?
                     cert.certFile && cert.keyFile :

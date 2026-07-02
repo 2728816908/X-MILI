@@ -262,8 +262,14 @@ install_prebuilt_bundle() {
     if ! curl -fL "$url" -o "$tmp_dir/package.tar.gz"; then
         return 1
     fi
-    tar -xzf "$tmp_dir/package.tar.gz" -C "$package_dir"
-    [[ -x "$package_dir/x-ui" && -f "$package_dir/x-ui.sh" && -d "$package_dir/bin" ]] || return 1
+    if ! tar -xzf "$tmp_dir/package.tar.gz" -C "$package_dir"; then
+        is_zh && warn "预编译包解压失败" || warn "Failed to extract prebuilt bundle"
+        return 1
+    fi
+    if [[ ! -x "$package_dir/x-ui" || ! -f "$package_dir/x-ui.sh" || ! -d "$package_dir/bin" ]]; then
+        is_zh && warn "预编译包不完整：缺少 x-ui、x-ui.sh 或 bin/" || warn "Incomplete prebuilt bundle: missing x-ui, x-ui.sh or bin/"
+        return 1
+    fi
 
     cp -a "$package_dir"/. "$INSTALL_DIR/"
     install -m 755 "$package_dir/x-ui.sh" /usr/bin/ml

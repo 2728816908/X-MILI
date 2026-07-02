@@ -30,6 +30,7 @@ jobs:
           docker run --rm --platform "${{ matrix.platform }}" \
             -e GITHUB_SHA="$GITHUB_SHA" \
             -v "$PWD:/src" -w /src golang:1.26.2-bookworm bash -lc '
+              set -euo pipefail
               apt-get update
               apt-get install -y --no-install-recommends gcc libc6-dev unzip ca-certificates curl
               rm -rf build dist
@@ -39,6 +40,9 @@ jobs:
               ./DockerInit.sh "${{ matrix.arch }}"
               cp x-ui.sh build/x-ui.sh
               echo "$GITHUB_SHA" > build/.x-mili-commit
+              test -x build/x-ui
+              test -f build/x-ui.sh
+              test -d build/bin
               tar -C build -czf "dist/x-mili-linux-${{ matrix.arch }}.tar.gz" .
             '
 

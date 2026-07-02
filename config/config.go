@@ -35,6 +35,22 @@ func GetVersion() string {
 	return strings.TrimSpace(version)
 }
 
+func GetAssetVersion() string {
+	assetVersion := GetVersion()
+	commitBytes, err := os.ReadFile(filepath.Join(getBaseDir(), ".x-mili-commit"))
+	if err != nil {
+		return assetVersion
+	}
+	commit := strings.TrimSpace(string(commitBytes))
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	if commit == "" {
+		return assetVersion
+	}
+	return assetVersion + "-" + commit
+}
+
 // GetName returns the name of the 3x-ui application.
 func GetName() string {
 	return strings.TrimSpace(name)

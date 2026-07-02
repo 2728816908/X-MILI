@@ -77,6 +77,20 @@ else
     fail "未找到当前架构的一体包。请等待 GitHub Actions 构建完成后重试。"
 fi
 
+stop_runtime() {
+    log "停止当前面板和 Xray..."
+    systemctl stop x-ui >/dev/null 2>&1 || true
+    for _ in {1..10}; do
+        if ! pgrep -x x-ui >/dev/null 2>&1 && ! pgrep -f '(^|/| )xray-linux-[^ /]+( |$)' >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    warn "进程未及时退出，强制结束残留进程..."
+    pkill -x x-ui >/dev/null 2>&1 || true
+    pkill -f '(^|/| )xray-linux-[^ /]+( |$)' >/dev/null 2>&1 || true
+}
+
 log "备份当前程序..."
 mkdir -p "$backup_dir/install"
 cp -a "$INSTALL_DIR"/. "$backup_dir/install"/
@@ -90,6 +104,8 @@ rollback() {
     [[ -f "$backup_dir/ml" ]] && install -m 755 "$backup_dir/ml" /usr/bin/ml
     systemctl restart x-ui >/dev/null 2>&1 || true
 }
+
+stop_runtime
 
 log "替换程序文件和菜单..."
 cp -a "$update_dir"/. "$INSTALL_DIR"/

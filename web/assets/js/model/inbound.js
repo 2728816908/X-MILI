@@ -936,7 +936,7 @@ RealityStreamSettings.Settings = class extends XrayCommonClass {
         publicKey = '',
         fingerprint = UTLS_FINGERPRINT.UTLS_CHROME,
         serverName = '',
-        spiderX = '/',
+        spiderX = `/${RandomUtil.randomLowerAndNum(12)}`,
         mldsa65Verify = ''
     ) {
         super();

@@ -114,7 +114,7 @@ class RandomUtil {
     }
 
     static randomShortIds() {
-        const lengths = [2, 4, 6, 8, 10, 12, 14, 16].sort(() => Math.random() - 0.5);
+        const lengths = [16, 14, 12, 10, 8, 6, 4, 2];
 
         return lengths.map(len => this.randomSeq(len, { type: "hex" })).join(',');
     }

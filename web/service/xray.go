@@ -110,6 +110,26 @@ func normalizeRealitySettings(stream map[string]any) {
 	delete(realitySettings, "settings")
 }
 
+func normalizeStreamSettingsForXray(raw string) (string, error) {
+	if len(raw) == 0 {
+		return raw, nil
+	}
+	stream := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &stream); err != nil {
+		return "", err
+	}
+	if tlsSettings, ok := stream["tlsSettings"].(map[string]any); ok {
+		delete(tlsSettings, "settings")
+	}
+	normalizeRealitySettings(stream)
+	delete(stream, "externalProxy")
+	newStream, err := json.MarshalIndent(stream, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(newStream), nil
+}
+
 // GetXrayConfig retrieves and builds the Xray configuration from settings and inbounds.
 func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	templateConfig, err := s.settingService.GetXrayConfigTemplate()
@@ -188,22 +208,11 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		}
 
 		if len(inbound.StreamSettings) > 0 {
-			// Unmarshal stream JSON
-			var stream map[string]any
-			json.Unmarshal([]byte(inbound.StreamSettings), &stream)
-
-			if tlsSettings, ok := stream["tlsSettings"].(map[string]any); ok {
-				delete(tlsSettings, "settings")
-			}
-			normalizeRealitySettings(stream)
-
-			delete(stream, "externalProxy")
-
-			newStream, err := json.MarshalIndent(stream, "", "  ")
+			newStream, err := normalizeStreamSettingsForXray(inbound.StreamSettings)
 			if err != nil {
 				return nil, err
 			}
-			inbound.StreamSettings = string(newStream)
+			inbound.StreamSettings = newStream
 		}
 
 		inboundConfig := inbound.GenXrayInboundConfig()

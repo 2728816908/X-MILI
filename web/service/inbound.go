@@ -312,17 +312,21 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	needRestart := false
 	if inbound.Enable {
 		s.xrayApi.Init(p.GetAPIPort())
-		inboundJson, err1 := json.MarshalIndent(inbound.GenXrayInboundConfig(), "", "  ")
+		runtimeInbound, err1 := s.buildRuntimeInboundForAPI(tx, inbound)
 		if err1 != nil {
-			logger.Debug("Unable to marshal inbound config:", err1)
-		}
-
-		err1 = s.xrayApi.AddInbound(inboundJson)
-		if err1 == nil {
-			logger.Debug("New inbound added by api:", inbound.Tag)
-		} else {
-			logger.Debug("Unable to add inbound by api:", err1)
+			logger.Debug("Unable to prepare inbound config:", err1)
 			needRestart = true
+		} else {
+			inboundJson, err1 := json.MarshalIndent(runtimeInbound.GenXrayInboundConfig(), "", "  ")
+			if err1 != nil {
+				logger.Debug("Unable to marshal inbound config:", err1)
+				needRestart = true
+			} else if err1 = s.xrayApi.AddInbound(inboundJson); err1 == nil {
+				logger.Debug("New inbound added by api:", inbound.Tag)
+			} else {
+				logger.Debug("Unable to add inbound by api:", err1)
+				needRestart = true
+			}
 		}
 		s.xrayApi.Close()
 	}
@@ -608,6 +612,14 @@ func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.I
 	}
 
 	runtimeInbound := *inbound
+	if len(runtimeInbound.StreamSettings) > 0 {
+		streamSettings, err := normalizeStreamSettingsForXray(runtimeInbound.StreamSettings)
+		if err != nil {
+			return nil, err
+		}
+		runtimeInbound.StreamSettings = streamSettings
+	}
+
 	settings := map[string]any{}
 	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
 		return nil, err

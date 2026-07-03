@@ -4,7 +4,7 @@
 .cache/
 .sync*
 
-# Ignore log files
+# Local runtime logs; do not upload. Keep log/logo.jpg as the tracked site logo.
 *.log
 
 # Ignore temporary files
@@ -29,9 +29,10 @@ main
 .DS_Store
 Thumbs.db
 
-# Ignore Go build files
+# Ignore Go build files and local panel databases
 *.exe
 x-ui.db
+db/*.db
 
 # Ignore Docker specific files
 docker-compose.override.yml

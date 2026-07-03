@@ -69,6 +69,16 @@ var (
 	openVPNInstallRunning bool
 )
 
+var triggerVPNGateFailoverAsyncHook func(int64)
+
+func triggerVPNGateFailoverAsync(taskID int64) {
+	if triggerVPNGateFailoverAsyncHook != nil {
+		triggerVPNGateFailoverAsyncHook(taskID)
+		return
+	}
+	go triggerVPNGateFailover(taskID)
+}
+
 func normalizeVPNGateRuleMode(ruleMode string) string {
 	switch ruleMode {
 	case "fixed":
@@ -130,18 +140,19 @@ func (s *OpenVPNService) ContinueVPNGateWithAll() OpenVPNStatus {
 func (s *OpenVPNService) VPNGateStatus() OpenVPNStatus {
 	vpnGateOpenVPN.Lock()
 	status := cloneOpenVPNStatus(vpnGateOpenVPN.status)
+	taskID := vpnGateOpenVPN.id
 	vpnGateOpenVPN.Unlock()
 
 	if status.Phase == "connected" {
 		if status.TunIP == "" || vpnGateTunIPActive(status.TunIP) {
 			return status
 		}
-		vpnGateOpenVPN.Lock()
-		if vpnGateOpenVPN.status.Phase == "connected" {
-			vpnGateOpenVPN.status.Phase = "failed"
-			vpnGateOpenVPN.status.Progress = 0
-			vpnGateOpenVPN.status.Message = "VPNGate 连接已失效"
+		server := VPNGateServer{}
+		if status.Server != nil {
+			server = *status.Server
 		}
+		handleVPNGateNodeFailure(taskID, server, "VPNGate 连接已失效")
+		vpnGateOpenVPN.Lock()
 		status = cloneOpenVPNStatus(vpnGateOpenVPN.status)
 		vpnGateOpenVPN.Unlock()
 		return status
@@ -617,7 +628,7 @@ func getXrayVPNGateOutbound() (map[string]any, string, bool) {
 		return nil, "", false
 	}
 	var configMap map[string]any
-	if err := json.Unmarshal([]byte(templateConfig), &configMap); err != nil {
+	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
 		return nil, "", false
 	}
 	outbounds, ok := configMap["outbounds"].([]any)
@@ -680,6 +691,12 @@ func handleVPNGateNodeFailure(taskID int64, server VPNGateServer, message string
 		vpnGateOpenVPN.failedUntil[server.IP] = time.Now().Add(vpnGateFailedTTL)
 	}
 	retry := vpnGateOpenVPN.fallbackEnable
+	if retry {
+		vpnGateOpenVPN.status.Phase = "connecting"
+		vpnGateOpenVPN.status.Message = "检测到节点失效，正在自动选择后备节点"
+		vpnGateOpenVPN.status.Progress = 50
+		vpnGateOpenVPN.status.Error = ""
+	}
 	vpnGateOpenVPN.Unlock()
 
 	if !retry {
@@ -687,7 +704,7 @@ func handleVPNGateNodeFailure(taskID int64, server VPNGateServer, message string
 		return
 	}
 	logger.Warningf("[VPNGate] Node %s failed, trying fallback: %s", server.IP, message)
-	go triggerVPNGateFailover(taskID)
+	triggerVPNGateFailoverAsync(taskID)
 }
 
 func (t *openVPNTask) stopLocked() {
@@ -965,7 +982,7 @@ func updateXrayVPNGateOutbound(outbound map[string]any) error {
 
 	// 2. Parse config JSON
 	var configMap map[string]any
-	if err := json.Unmarshal([]byte(templateConfig), &configMap); err != nil {
+	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
 		return err
 	}
 
@@ -1026,7 +1043,7 @@ func removeXrayVPNGateOutbound() error {
 	}
 
 	var configMap map[string]any
-	if err := json.Unmarshal([]byte(templateConfig), &configMap); err != nil {
+	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
 		return err
 	}
 

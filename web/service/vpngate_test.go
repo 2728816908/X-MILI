@@ -3,9 +3,21 @@ package service
 import (
 	"encoding/base64"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	xuilogger "github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/op/go-logging"
 )
+
+var vpnGateLoggerInitOnce sync.Once
+
+func initVPNGateTestLogger() {
+	vpnGateLoggerInitOnce.Do(func() {
+		xuilogger.InitLogger(logging.ERROR)
+	})
+}
 
 func TestParseVPNGateProtoPort(t *testing.T) {
 	config := base64.StdEncoding.EncodeToString([]byte("client\nproto tcp\nremote 1.2.3.4 443 tcp\n"))
@@ -164,5 +176,59 @@ func TestFilterVPNGateCandidatesSkipsCurrentAndTemporarilyFailed(t *testing.T) {
 	got := filterVPNGateCandidates(servers, current, failedUntil, now)
 	if len(got) != 1 || got[0].IP != "3.3.3.3" {
 		t.Fatalf("unexpected candidates: %+v", got)
+	}
+}
+
+func TestVPNGateStatusStartsFailoverWhenTunDisappears(t *testing.T) {
+	initVPNGateTestLogger()
+
+	vpnGateOpenVPN.Lock()
+	oldID := vpnGateOpenVPN.id
+	oldStatus := cloneOpenVPNStatus(vpnGateOpenVPN.status)
+	oldRuleMode := vpnGateOpenVPN.ruleMode
+	oldSelectedCountries := append([]string(nil), vpnGateOpenVPN.selectedCountries...)
+	oldFallbackEnable := vpnGateOpenVPN.fallbackEnable
+	oldGlobalFallback := vpnGateOpenVPN.globalFallback
+	oldFailedUntil := copyVPNGateFailedUntil(vpnGateOpenVPN.failedUntil)
+	vpnGateOpenVPN.id = 1001
+	vpnGateOpenVPN.status = OpenVPNStatus{
+		Phase:   "connected",
+		Message: "连接成功",
+		TunIP:   "198.18.0.1",
+		Server:  &VPNGateServer{IP: "1.1.1.1"},
+	}
+	vpnGateOpenVPN.fallbackEnable = true
+	vpnGateOpenVPN.failedUntil = map[string]time.Time{}
+	vpnGateOpenVPN.Unlock()
+
+	oldTrigger := triggerVPNGateFailoverAsyncHook
+	called := make(chan int64, 1)
+	triggerVPNGateFailoverAsyncHook = func(taskID int64) {
+		called <- taskID
+	}
+	defer func() {
+		triggerVPNGateFailoverAsyncHook = oldTrigger
+		vpnGateOpenVPN.Lock()
+		vpnGateOpenVPN.id = oldID
+		vpnGateOpenVPN.status = oldStatus
+		vpnGateOpenVPN.ruleMode = oldRuleMode
+		vpnGateOpenVPN.selectedCountries = oldSelectedCountries
+		vpnGateOpenVPN.fallbackEnable = oldFallbackEnable
+		vpnGateOpenVPN.globalFallback = oldGlobalFallback
+		vpnGateOpenVPN.failedUntil = oldFailedUntil
+		vpnGateOpenVPN.Unlock()
+	}()
+
+	status := (&OpenVPNService{}).VPNGateStatus()
+	if status.Phase != "connecting" {
+		t.Fatalf("expected connecting failover state, got %+v", status)
+	}
+	select {
+	case taskID := <-called:
+		if taskID != 1001 {
+			t.Fatalf("unexpected failover task id %d", taskID)
+		}
+	default:
+		t.Fatalf("failover was not triggered")
 	}
 }

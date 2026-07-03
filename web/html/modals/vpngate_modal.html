@@ -455,8 +455,8 @@
                 const oldPhase = vpngateModal.connectStatus.phase;
                 this.setConnectStatus(msg.obj);
                 if (msg.obj.phase === 'connected') {
+                    this.upsertVPNGateOutbound(msg.obj.outbound);
                     if (oldPhase !== 'connected') {
-                        this.upsertVPNGateOutbound(msg.obj.outbound);
                         if (window.vpngateLoadingMsg) {
                             window.vpngateLoadingMsg(); // dismiss loading toast
                             window.vpngateLoadingMsg = null;

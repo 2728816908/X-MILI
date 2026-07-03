@@ -296,6 +296,10 @@ func (a *XraySettingController) testOutbound(c *gin.Context) {
 		return
 	}
 
+	if templateConfig, err := a.SettingService.GetXrayConfigTemplate(); err == nil {
+		outboundJSON, allOutboundsJSON = syncManagedOutboundTestConfig(outboundJSON, allOutboundsJSON, templateConfig)
+	}
+
 	// Load the test URL from server settings to prevent SSRF via user-controlled URLs
 	testURL, _ := a.SettingService.GetXrayOutboundTestUrl()
 
@@ -306,4 +310,57 @@ func (a *XraySettingController) testOutbound(c *gin.Context) {
 	}
 
 	jsonObj(c, result, nil)
+}
+
+func syncManagedOutboundTestConfig(outboundJSON, allOutboundsJSON, templateConfig string) (string, string) {
+	var outbound map[string]any
+	if err := json.Unmarshal([]byte(outboundJSON), &outbound); err != nil {
+		return outboundJSON, allOutboundsJSON
+	}
+	tag, _ := outbound["tag"].(string)
+	if tag != "vpngate" && tag != "warp" {
+		return outboundJSON, allOutboundsJSON
+	}
+
+	var configMap map[string]any
+	if err := json.Unmarshal([]byte(service.UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
+		return outboundJSON, allOutboundsJSON
+	}
+	templateOutbounds, _ := configMap["outbounds"].([]any)
+	var latest any
+	for _, item := range templateOutbounds {
+		itemMap, ok := item.(map[string]any)
+		if ok && itemMap["tag"] == tag {
+			latest = item
+			break
+		}
+	}
+	if latest == nil {
+		return outboundJSON, allOutboundsJSON
+	}
+	if latestJSON, err := json.Marshal(latest); err == nil {
+		outboundJSON = string(latestJSON)
+	}
+
+	outbounds := templateOutbounds
+	var postedOutbounds []any
+	if allOutboundsJSON != "" && json.Unmarshal([]byte(allOutboundsJSON), &postedOutbounds) == nil && len(postedOutbounds) > 0 {
+		outbounds = postedOutbounds
+	}
+	replaced := false
+	for i, item := range outbounds {
+		itemMap, ok := item.(map[string]any)
+		if ok && itemMap["tag"] == tag {
+			outbounds[i] = latest
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		outbounds = append(outbounds, latest)
+	}
+	if outboundsJSON, err := json.Marshal(outbounds); err == nil {
+		allOutboundsJSON = string(outboundsJSON)
+	}
+	return outboundJSON, allOutboundsJSON
 }

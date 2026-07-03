@@ -4,7 +4,7 @@
 .cache/
 .sync*
 
-# Local runtime logs; do not upload. Keep log/logo.jpg as the tracked site logo.
+# Local runtime logs; do not upload.
 *.log
 
 # Ignore temporary files

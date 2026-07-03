@@ -31,6 +31,8 @@ RUN apk add --no-cache --update \
   fail2ban \
   bash \
   curl \
+  iproute2 \
+  openvpn \
   openssl
 
 COPY --from=builder /app/build/ /app/
@@ -52,7 +54,7 @@ RUN chmod +x \
   /usr/bin/x-ui \
   /usr/bin/ml
 
-ENV XUI_ENABLE_FAIL2BAN="true"
+ENV XUI_ENABLE_FAIL2BAN="false"
 EXPOSE 2053
 VOLUME [ "/etc/x-ui" ]
 CMD [ "./x-ui" ]

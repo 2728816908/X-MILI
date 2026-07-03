@@ -85,16 +85,35 @@ ml
 
 ## Docker 运行
 
+推荐使用 Docker 一键脚本，主机会生成 `ml` 管理菜单，用来管理容器：
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/Aimilibot/X-MILI/main/install-docker.sh)
+```
+
+常用命令：
+
+```bash
+ml
+ml status
+ml restart
+ml restart-xray
+ml log
+```
+
+如果手动运行 Docker，VPNGate/OpenVPN 需要 host 网络、TUN 设备和 NET_ADMIN 权限：
+
 ```bash
 docker build -t ml .
 docker run -d \
   --name ml \
-  -p 2053:2053 \
-  -p 2096:2096 \
+  --network host \
+  --cap-add NET_ADMIN \
+  --device /dev/net/tun:/dev/net/tun \
   -v ./db:/etc/x-ui \
   -v ./cert:/root/cert \
   -e XRAY_VMESS_AEAD_FORCED=false \
-  -e XUI_ENABLE_FAIL2BAN=true \
+  -e XUI_ENABLE_FAIL2BAN=false \
   ml
 ```
 

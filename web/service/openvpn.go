@@ -173,6 +173,60 @@ func (s *OpenVPNService) VPNGateStatus() OpenVPNStatus {
 	return status
 }
 
+func (s *OpenVPNService) RecoverStaleVPNGateOutbound() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	_, tunIP, ok := getXrayVPNGateOutbound()
+	if ok && (tunIP == "" || vpnGateTunIPActive(tunIP)) {
+		return
+	}
+	if ok {
+		logger.Warningf("[VPNGate] Removing stale outbound for missing tun IP %s", tunIP)
+		cleanupOpenVPNPolicyRoute(tunIP)
+		if err := removeXrayVPNGateOutbound(); err != nil {
+			logger.Warningf("[VPNGate] Failed to remove stale outbound: %v", err)
+		}
+	} else if xrayReferencesVPNGateOutbound() {
+		logger.Warning("[VPNGate] Recovering missing outbound referenced by routing rules")
+	} else {
+		return
+	}
+
+	settingService := &SettingService{}
+	ruleMode, err := settingService.GetVPNGateRuleMode()
+	if err != nil {
+		ruleMode = "default"
+	}
+	countriesStr, err := settingService.GetVPNGateSelectedCountries()
+	if err != nil {
+		countriesStr = "[]"
+	}
+	var selectedCountries []string
+	_ = json.Unmarshal([]byte(countriesStr), &selectedCountries)
+	fallbackEnable, err := settingService.GetVPNGateFallbackEnable()
+	if err != nil {
+		fallbackEnable = true
+	}
+
+	vpnGateOpenVPN.Lock()
+	vpnGateOpenVPN.stopLocked()
+	vpnGateOpenVPN.id++
+	taskID := vpnGateOpenVPN.id
+	vpnGateOpenVPN.ruleMode = normalizeVPNGateRuleMode(ruleMode)
+	vpnGateOpenVPN.selectedCountries = selectedCountries
+	vpnGateOpenVPN.fallbackEnable = fallbackEnable
+	vpnGateOpenVPN.globalFallback = false
+	vpnGateOpenVPN.status = OpenVPNStatus{
+		Phase:    "connecting",
+		Progress: 45,
+		Message:  "检测到上次 VPNGate 连接已失效，正在自动恢复",
+	}
+	vpnGateOpenVPN.Unlock()
+
+	triggerVPNGateFailoverAsync(taskID)
+}
+
 func (s *OpenVPNService) PrepareVPNGateOpenVPN() {
 	if runtime.GOOS != "linux" || commandExists("openvpn") {
 		return
@@ -305,10 +359,10 @@ func (s *OpenVPNService) connectVPNGate(ctx context.Context, taskID int64, serve
 			return
 		case <-ticker.C:
 			vpnGateOpenVPN.appendLog(writer.lines())
-			if writer.contains("Initialization Sequence Completed") {
-				tunIP, tunDev, err := detectOpenVPNTun(beforeTun)
-				if err != nil {
-					vpnGateOpenVPN.fail(taskID, err.Error())
+			tunIP, tunDev, detectErr := detectOpenVPNTun(beforeTun)
+			if writer.contains("Initialization Sequence Completed") || detectErr == nil {
+				if detectErr != nil {
+					vpnGateOpenVPN.fail(taskID, detectErr.Error())
 					return
 				}
 				if err := setupOpenVPNPolicyRoute(tunIP, tunDev); err != nil {
@@ -644,6 +698,35 @@ func getXrayVPNGateOutbound() (map[string]any, string, bool) {
 		return outboundMap, tunIP, true
 	}
 	return nil, "", false
+}
+
+func xrayReferencesVPNGateOutbound() bool {
+	templateConfig, err := (&SettingService{}).GetXrayConfigTemplate()
+	if err != nil {
+		return false
+	}
+	var configMap map[string]any
+	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
+		return false
+	}
+	routing, ok := configMap["routing"].(map[string]any)
+	if !ok {
+		return false
+	}
+	rules, ok := routing["rules"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rule := range rules {
+		ruleMap, ok := rule.(map[string]any)
+		if !ok {
+			continue
+		}
+		if outboundTag, _ := ruleMap["outboundTag"].(string); outboundTag == vpnGateOutboundTag {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *openVPNTask) setTask(taskID int64, phase string, progress int, message string) {

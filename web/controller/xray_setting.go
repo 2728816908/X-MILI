@@ -296,8 +296,10 @@ func (a *XraySettingController) testOutbound(c *gin.Context) {
 		return
 	}
 
-	if templateConfig, err := a.SettingService.GetXrayConfigTemplate(); err == nil {
-		outboundJSON, allOutboundsJSON = syncManagedOutboundTestConfig(outboundJSON, allOutboundsJSON, templateConfig)
+	if c.PostForm("useLatestManaged") != "false" {
+		if templateConfig, err := a.SettingService.GetXrayConfigTemplate(); err == nil {
+			outboundJSON, allOutboundsJSON = syncManagedOutboundTestConfig(outboundJSON, allOutboundsJSON, templateConfig)
+		}
 	}
 
 	// Load the test URL from server settings to prevent SSRF via user-controlled URLs

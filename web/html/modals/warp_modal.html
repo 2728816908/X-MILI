@@ -206,7 +206,8 @@
                 outbounds.push(candidate);
                 const msg = await HttpUtil.post('/panel/xray/testOutbound', {
                     outbound: JSON.stringify(candidate),
-                    allOutbounds: JSON.stringify(outbounds)
+                    allOutbounds: JSON.stringify(outbounds),
+                    useLatestManaged: 'false'
                 });
                 if (!msg.success || !msg.obj) {
                     return { success: false, error: msg.msg || 'WARP 测试失败' };

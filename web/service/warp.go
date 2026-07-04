@@ -407,7 +407,27 @@ func saveWarpReplacement(configMap map[string]any, outbounds []any, warpData map
 		return err
 	}
 
-	configMap["outbounds"] = outbounds
+	var warpOutbound map[string]any
+	for _, outbound := range outbounds {
+		outboundMap, ok := outbound.(map[string]any)
+		if ok && outboundMap["tag"] == "warp" {
+			warpOutbound = outboundMap
+			break
+		}
+	}
+	if warpOutbound == nil {
+		return common.NewError("warp outbound not found")
+	}
+
+	templateConfig, err := (&SettingService{}).GetXrayConfigTemplate()
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
+		return err
+	}
+	latestOutbounds, _ := configMap["outbounds"].([]any)
+	configMap["outbounds"] = replaceOutboundByTag(latestOutbounds, "warp", warpOutbound)
 	newConfigBytes, err := json.MarshalIndent(configMap, "", "  ")
 	if err != nil {
 		return err

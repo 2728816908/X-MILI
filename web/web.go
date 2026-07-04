@@ -323,6 +323,10 @@ func (s *Server) startTask() {
 	s.cron.AddFunc("@every 12m", func() {
 		(&service.WarpService{}).CheckAndRepairWarp()
 	})
+	time.AfterFunc(15*time.Second, func() {
+		(&service.OpenVPNService{}).RecoverStaleVPNGateOutbound()
+		(&service.WarpService{}).CheckAndRepairWarp()
+	})
 
 	// Check if xray needs to be restarted every 30 seconds
 	s.cron.AddFunc("@every 30s", func() {

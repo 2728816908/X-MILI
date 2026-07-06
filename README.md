@@ -26,12 +26,10 @@ X-MILI 是一个简洁版代理面板：
 
 ## VPS 推荐
 
-跑 X-MILI 推荐使用支持 TUN/TAP 的 KVM VPS。
-
 | 推荐 | 适合人群 | 亮点 | 入口 |
 | --- | --- | --- | --- |
-| 搬 瓦 工 | 更看重线路、延迟和长期稳定的用户 | CN2 GIA 三网优化线路 | [立即查看](https://bandwagonhost.com/aff.php?aff=81790) |
-| RackNerd | 更看重低成本和大流量的用户 | 价格低、流量多，适合测试和入门 | [立即查看](https://my.racknerd.com/aff.php?aff=18708) |
+| 搬 瓦 工 | 稳定低延迟| CN2GIA，顶级三网优化 | [立即查看](https://bandwagonhost.com/aff.php?aff=81790) |
+| RackNerd | 大流量使用 | 4TB流量，价格低、流量多 | [立即查看](https://my.racknerd.com/aff.php?aff=18708) |
 
 ## 一键安装
 

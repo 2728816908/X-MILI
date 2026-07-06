@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -10,6 +11,8 @@ import (
 	"runtime"
 	"strconv"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 type VPNGateValidator struct{}
@@ -71,8 +74,29 @@ func (VPNGateValidator) Validate(servers []VPNGateServer) []VPNGateServer {
 	return servers
 }
 
+// warpDial 通过本机 WARP SOCKS5 代理（127.0.0.1:40000）建立连接。
+// 若代理不可用则降级为直连，并统一应用 timeout。
+func warpDial(network, addr string, timeout time.Duration) (net.Conn, error) {
+	dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:40000", nil, proxy.Direct)
+	if err != nil {
+		return net.DialTimeout(network, addr, timeout)
+	}
+	type res struct {
+		conn net.Conn
+		err  error
+	}
+	ch := make(chan res, 1)
+	go func() { c, e := dialer.Dial(network, addr); ch <- res{c, e} }()
+	select {
+	case r := <-ch:
+		return r.conn, r.err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("warp dial timeout: %s", addr)
+	}
+}
+
 func testVPNGateTCP(ip, port string) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 2*time.Second)
+	conn, err := warpDial("tcp", net.JoinHostPort(ip, port), 4*time.Second)
 	if err != nil {
 		return false
 	}
@@ -148,7 +172,7 @@ func testVPNGateOpenVPN(server VPNGateServer) (bool, int64) {
 func measureVPNGateHTTPLatency(ip string) int64 {
 	for _, port := range []string{"80", "443", "8080"} {
 		start := time.Now()
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 3*time.Second)
+		conn, err := warpDial("tcp", net.JoinHostPort(ip, port), 5*time.Second)
 		if err == nil {
 			conn.Close()
 			return time.Since(start).Milliseconds()

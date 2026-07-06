@@ -100,7 +100,8 @@
                 <thead>
                     <tr>
                         <th>国家</th>
-                        <th>延迟</th>
+                        <th>ICMP</th>
+                        <th>HTTP</th>
                         <th>IP 类型</th>
                         <th>ASN</th>
                         <th>节点 IP</th>
@@ -109,12 +110,12 @@
                 </thead>
                 <tbody v-for="group in groupedServers" :key="group.countryLong">
                     <tr class="vpngate-country-header" @click="toggleCountryCollapse(group.countryLong)"
-                        :title="group.countryLong + '，' + group.servers.length + ' 个节点'">
-                        <td colspan="6">
+                        :title="(group.countryZH || group.countryLong) + '，' + group.servers.length + ' 个节点'">
+                        <td colspan="7">
                             <div class="vpngate-country-row">
                                 <div class="vpngate-country-name">
                                     <a-icon :type="isCountryCollapsed(group.countryLong) ? 'right' : 'down'"></a-icon>
-                                    <span class="vpngate-country-label">[[ group.countryLong ]]</span>
+                                    <span class="vpngate-country-label">[[ group.countryZH || group.countryLong ]]</span>
                                 </div>
                                 <a-tag color="cyan">[[ group.servers.length ]]</a-tag>
                             </div>
@@ -123,10 +124,13 @@
                     <template v-if="!isCountryCollapsed(group.countryLong)">
                         <tr v-for="server in group.servers" :key="group.countryLong + server.hostName + server.ip">
                             <td>
-                                <span class="vpngate-country-label">[[ server.countryLong ]]</span>
+                                <span class="vpngate-country-label">[[ server.countryLongZH || server.countryLong ]]</span>
                             </td>
                             <td>
                                 <span :class="pingClass(server.localPing)">[[ formatPing(server.localPing) ]]</span>
+                            </td>
+                            <td>
+                                <span :class="pingClass(server.httpLatency)">[[ formatPing(server.httpLatency) ]]</span>
                             </td>
                             <td>
                                 <a-tag :color="server.ipType === '住宅IP' ? 'green' : (server.ipType === '机房IP' ? 'orange' : 'default')">
@@ -205,7 +209,7 @@
                     if (!server.countryShort) return;
                     countries.set(server.countryShort, {
                         value: server.countryShort,
-                        label: `${server.countryLong} (${server.countryShort})`,
+                        label: `${server.countryLongZH || server.countryLong} (${server.countryShort})`,
                     });
                 });
                 return Array.from(countries.values()).sort((a, b) => a.label.localeCompare(b.label));
@@ -227,7 +231,8 @@
                 return vpngateModal.connectStatus.server || this.bestServer;
             },
             currentCountry() {
-                return this.displayServer ? this.displayServer.countryLong : '未选择节点';
+                if (!this.displayServer) return '未选择节点';
+                return this.displayServer.countryLongZH || this.displayServer.countryLong;
             },
             currentNodeIP() {
                 return this.displayServer ? this.displayServer.ip : '—';
@@ -279,8 +284,8 @@
                 if (status.error) return '原因：' + status.error;
                 const logs = Array.isArray(status.log) ? status.log.filter(Boolean) : [];
                 if (logs.length > 0) return '日志：' + logs[logs.length - 1];
-                if (status.server && status.server.ip) return `当前节点：${status.server.countryLong || ''} ${status.server.ip}`;
-                if (this.displayServer && this.displayServer.ip) return `当前节点：${this.displayServer.countryLong || ''} ${this.displayServer.ip}`;
+                if (status.server && status.server.ip) return `当前节点：${status.server.countryLongZH || status.server.countryLong || ''} ${status.server.ip}`;
+                if (this.displayServer && this.displayServer.ip) return `当前节点：${this.displayServer.countryLongZH || this.displayServer.countryLong || ''} ${this.displayServer.ip}`;
                 return '';
             },
             statusName() {
@@ -332,6 +337,7 @@
                     if (!groups[country]) {
                         groups[country] = {
                             countryLong: server.countryLong,
+                            countryZH: server.countryLongZH || server.countryLong,
                             countryShort: server.countryShort,
                             servers: [],
                         };

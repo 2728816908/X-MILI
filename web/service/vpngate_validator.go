@@ -15,9 +15,10 @@ import (
 type VPNGateValidator struct{}
 
 type vpnGateCheckResult struct {
-	index     int
-	localPing int64
-	isAlive   bool
+	index       int
+	localPing   int64
+	httpLatency int64
+	isAlive     bool
 }
 
 var vpnGateMSRegex = regexp.MustCompile(`[=<]\s*(\d+)ms|time[=<]\s*(\d+)\.?(\d*)\s*ms`)
@@ -44,7 +45,8 @@ func (VPNGateValidator) Validate(servers []VPNGateServer) []VPNGateServer {
 				if alive && ping < 0 {
 					ping = 999999
 				}
-				results <- vpnGateCheckResult{index: index, localPing: ping, isAlive: alive}
+				httpLat := measureVPNGateHTTPLatency(server.IP)
+				results <- vpnGateCheckResult{index: index, localPing: ping, httpLatency: httpLat, isAlive: alive}
 			}
 		}()
 	}
@@ -60,8 +62,10 @@ func (VPNGateValidator) Validate(servers []VPNGateServer) []VPNGateServer {
 	}
 	for i, res := range checked {
 		servers[i].LocalPing = -1
+		servers[i].HttpLatency = -1
 		if res.isAlive {
 			servers[i].LocalPing = res.localPing
+			servers[i].HttpLatency = res.httpLatency
 		}
 	}
 	return servers
@@ -139,6 +143,18 @@ func TestVPNGateOpenVPN(server VPNGateServer) (bool, int64) {
 
 func testVPNGateOpenVPN(server VPNGateServer) (bool, int64) {
 	return TestVPNGateOpenVPN(server)
+}
+
+func measureVPNGateHTTPLatency(ip string) int64 {
+	for _, port := range []string{"80", "443", "8080"} {
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 3*time.Second)
+		if err == nil {
+			conn.Close()
+			return time.Since(start).Milliseconds()
+		}
+	}
+	return -1
 }
 
 func pingVPNGateIP(ip string) int64 {

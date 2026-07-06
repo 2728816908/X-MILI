@@ -22,12 +22,14 @@ type vpnGateIPResponse struct {
 	AS      string `json:"as"`
 	Hosting bool   `json:"hosting"`
 	Query   string `json:"query"`
+	Country string `json:"country"`
 }
 
 type vpnGateIPInfo struct {
-	ISP    string
-	ASN    string
-	IPType string
+	ISP           string
+	ASN           string
+	IPType        string
+	CountryLongZH string
 }
 
 func (VPNGateFetcher) Fetch() ([]VPNGateServer, error) {
@@ -66,6 +68,9 @@ func (VPNGateFetcher) Fetch() ([]VPNGateServer, error) {
 		servers[i].ISP = info.ISP
 		servers[i].ASN = info.ASN
 		servers[i].IPType = info.IPType
+		if info.CountryLongZH != "" {
+			servers[i].CountryLongZH = info.CountryLongZH
+		}
 	}
 
 	return servers, nil
@@ -182,7 +187,7 @@ func fetchVPNGateIPData(ips []string) map[string]vpnGateIPInfo {
 			end = len(ips)
 		}
 		payload, _ := json.Marshal(ips[i:end])
-		resp, err := client.Post("http://ip-api.com/batch?fields=status,isp,org,as,hosting,query", "application/json", bytes.NewReader(payload))
+		resp, err := client.Post("http://ip-api.com/batch?fields=status,isp,org,as,hosting,query,country&lang=zh-CN", "application/json", bytes.NewReader(payload))
 		if err != nil {
 			continue
 		}
@@ -204,9 +209,10 @@ func fetchVPNGateIPData(ips []string) map[string]vpnGateIPInfo {
 				isp = "Unknown"
 			}
 			result[row.Query] = vpnGateIPInfo{
-				ISP:    isp,
-				ASN:    extractVPNGateASN(row.AS),
-				IPType: determineVPNGateIPType(row.Hosting, row.ISP, row.Org),
+				ISP:           isp,
+				ASN:           extractVPNGateASN(row.AS),
+				IPType:        determineVPNGateIPType(row.Hosting, row.ISP, row.Org),
+				CountryLongZH: row.Country,
 			}
 		}
 		time.Sleep(500 * time.Millisecond)

@@ -30,6 +30,8 @@ type VPNGateServer struct {
 	Proto             string `json:"proto"`
 	Port              string `json:"port"`
 	OpenVPNConfig     string `json:"openVPNConfig"`
+	HttpLatency       int64  `json:"httpLatency"`
+	CountryLongZH    string `json:"countryLongZH"`
 }
 
 var vpnGateCache struct {

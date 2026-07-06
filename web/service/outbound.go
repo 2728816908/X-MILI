@@ -276,6 +276,10 @@ func (s *OutboundService) createTestConfig(outboundTag string, allOutbounds []an
 			processedOutbounds[i] = ob
 			continue
 		}
+		raw, _ := json.Marshal(outbound)
+		var outboundCopy map[string]any
+		_ = json.Unmarshal(raw, &outboundCopy)
+		outbound = outboundCopy
 		if protocol, ok := outbound["protocol"].(string); ok && protocol == "wireguard" {
 			// Set noKernelTun to true for WireGuard outbounds
 			if settings, ok := outbound["settings"].(map[string]any); ok {

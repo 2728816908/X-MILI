@@ -144,7 +144,7 @@ func (s *OpenVPNService) VPNGateStatus() OpenVPNStatus {
 	vpnGateOpenVPN.Unlock()
 
 	if status.Phase == "connected" {
-		if status.TunIP == "" || vpnGateTunIPActive(status.TunIP) {
+		if status.TunIP != "" && vpnGateTunIPActive(status.TunIP) {
 			return status
 		}
 		server := VPNGateServer{}
@@ -163,12 +163,27 @@ func (s *OpenVPNService) VPNGateStatus() OpenVPNStatus {
 	}
 
 	if synced, ok := inferVPNGateStatusFromXray(); ok {
+		ruleMode, selectedCountries, fallbackEnable := savedVPNGateOptions()
+		var watchdogCtx context.Context
+		var watchdogTaskID int64
 		vpnGateOpenVPN.Lock()
 		if vpnGateOpenVPN.status.Phase != "installing" && vpnGateOpenVPN.status.Phase != "preparing" && vpnGateOpenVPN.status.Phase != "connecting" && vpnGateOpenVPN.status.Phase != "waiting_confirm" {
+			ctx, cancel := context.WithCancel(context.Background())
+			vpnGateOpenVPN.id++
+			watchdogTaskID = vpnGateOpenVPN.id
+			watchdogCtx = ctx
+			vpnGateOpenVPN.cancel = cancel
+			vpnGateOpenVPN.ruleMode = ruleMode
+			vpnGateOpenVPN.selectedCountries = selectedCountries
+			vpnGateOpenVPN.fallbackEnable = fallbackEnable
+			vpnGateOpenVPN.globalFallback = false
 			vpnGateOpenVPN.status = synced
 		}
 		status = cloneOpenVPNStatus(vpnGateOpenVPN.status)
 		vpnGateOpenVPN.Unlock()
+		if watchdogCtx != nil {
+			go startNetworkChecker(watchdogCtx, watchdogTaskID, synced.TunIP, synced.TunDev)
+		}
 	}
 	return status
 }
@@ -177,8 +192,15 @@ func (s *OpenVPNService) RecoverStaleVPNGateOutbound() {
 	if runtime.GOOS != "linux" {
 		return
 	}
+	vpnGateOpenVPN.Lock()
+	phase := vpnGateOpenVPN.status.Phase
+	vpnGateOpenVPN.Unlock()
+	if phase == "installing" || phase == "preparing" || phase == "connecting" || phase == "waiting_confirm" {
+		return
+	}
 	_, tunIP, ok := getXrayVPNGateOutbound()
 	if ok && tunIP != "" && vpnGateTunIPActive(tunIP) {
+		s.VPNGateStatus()
 		return
 	}
 	if ok {
@@ -742,24 +764,7 @@ func xrayReferencesVPNGateOutbound() bool {
 	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
 		return false
 	}
-	routing, ok := configMap["routing"].(map[string]any)
-	if !ok {
-		return false
-	}
-	rules, ok := routing["rules"].([]any)
-	if !ok {
-		return false
-	}
-	for _, rule := range rules {
-		ruleMap, ok := rule.(map[string]any)
-		if !ok {
-			continue
-		}
-		if outboundTag, _ := ruleMap["outboundTag"].(string); outboundTag == vpnGateOutboundTag {
-			return true
-		}
-	}
-	return false
+	return xrayReferencesOutbound(configMap, vpnGateOutboundTag)
 }
 
 func (t *openVPNTask) setTask(taskID int64, phase string, progress int, message string) {
@@ -831,8 +836,17 @@ func (t *openVPNTask) stopLocked() {
 	if t.cmd != nil && t.cmd.Process != nil {
 		_ = t.cmd.Process.Kill()
 		t.cmd = nil
+	} else {
+		killActiveVPNGateOpenVPN()
 	}
 	cleanupOpenVPNPolicyRoute(t.status.TunIP)
+}
+
+func killActiveVPNGateOpenVPN() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	_ = exec.Command("pkill", "-f", `openvpn .*vpngate/active\.ovpn`).Run()
 }
 
 func (t *openVPNTask) addLog(line string) {
@@ -1086,6 +1100,9 @@ func containsString(slice []string, s string) bool {
 }
 
 func updateXrayVPNGateOutbound(outbound map[string]any) error {
+	managedOutboundMu.Lock()
+	defer managedOutboundMu.Unlock()
+
 	settingService := &SettingService{}
 	xraySettingService := &XraySettingService{}
 	xrayService := &XrayService{}
@@ -1149,6 +1166,9 @@ func (s *OpenVPNService) UninstallVPNGate() error {
 }
 
 func removeXrayVPNGateOutbound() error {
+	managedOutboundMu.Lock()
+	defer managedOutboundMu.Unlock()
+
 	settingService := &SettingService{}
 	xraySettingService := &XraySettingService{}
 	xrayService := &XrayService{}

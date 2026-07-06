@@ -27,6 +27,22 @@ type InboundService struct {
 	xrayApi xray.XrayAPI
 }
 
+func inboundClients(settings map[string]any) ([]any, error) {
+	clients, ok := settings["clients"].([]any)
+	if !ok {
+		return nil, common.NewError("invalid inbound clients settings")
+	}
+	return clients, nil
+}
+
+func inboundClientMap(client any) (map[string]any, error) {
+	c, ok := client.(map[string]any)
+	if !ok {
+		return nil, common.NewError("invalid inbound client settings")
+	}
+	return c, nil
+}
+
 type CopyClientsResult struct {
 	Added   []string `json:"added"`
 	Skipped []string `json:"skipped"`
@@ -747,7 +763,10 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 		return false, err
 	}
 
-	interfaceClients := settings["clients"].([]any)
+	interfaceClients, err := inboundClients(settings)
+	if err != nil {
+		return false, err
+	}
 	// Add timestamps for new clients being appended
 	nowTs := time.Now().Unix() * 1000
 	for i := range interfaceClients {
@@ -800,7 +819,10 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 		return false, err
 	}
 
-	oldClients := oldSettings["clients"].([]any)
+	oldClients, err := inboundClients(oldSettings)
+	if err != nil {
+		return false, err
+	}
 	oldClients = append(oldClients, interfaceClients...)
 
 	oldSettings["clients"] = oldClients
@@ -831,7 +853,7 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 			if client.Enable {
 				cipher := ""
 				if oldInbound.Protocol == "shadowsocks" {
-					cipher = oldSettings["method"].(string)
+					cipher, _ = oldSettings["method"].(string)
 				}
 				err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
 					"email":    client.Email,
@@ -1077,13 +1099,19 @@ func (s *InboundService) DelInboundClient(inboundId int, clientId string) (bool,
 		client_key = "auth"
 	}
 
-	interfaceClients := settings["clients"].([]any)
+	interfaceClients, err := inboundClients(settings)
+	if err != nil {
+		return false, err
+	}
 	var newClients []any
 	needApiDel := false
 	clientFound := false
 	for _, client := range interfaceClients {
-		c := client.(map[string]any)
-		c_id := c[client_key].(string)
+		c, err := inboundClientMap(client)
+		if err != nil {
+			return false, err
+		}
+		c_id, _ := c[client_key].(string)
 		if c_id == clientId {
 			clientFound = true
 			email, _ = c["email"].(string)
@@ -1163,7 +1191,10 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 		return false, err
 	}
 
-	interfaceClients := settings["clients"].([]any)
+	interfaceClients, err := inboundClients(settings)
+	if err != nil {
+		return false, err
+	}
 
 	oldInbound, err := s.GetInbound(data.Id)
 	if err != nil {
@@ -1221,7 +1252,10 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	if err != nil {
 		return false, err
 	}
-	settingsClients := oldSettings["clients"].([]any)
+	settingsClients, err := inboundClients(oldSettings)
+	if err != nil {
+		return false, err
+	}
 	// Preserve created_at and set updated_at for the replacing client
 	var preservedCreated any
 	if clientIndex >= 0 && clientIndex < len(settingsClients) {
@@ -1303,7 +1337,7 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 		if clients[0].Enable {
 			cipher := ""
 			if oldInbound.Protocol == "shadowsocks" {
-				cipher = oldSettings["method"].(string)
+				cipher, _ = oldSettings["method"].(string)
 			}
 			err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
 				"email":    clients[0].Email,
@@ -1481,14 +1515,20 @@ func (s *InboundService) adjustTraffics(tx *gorm.DB, dbClientTraffics []*xray.Cl
 		for inbound_index := range inbounds {
 			settings := map[string]any{}
 			json.Unmarshal([]byte(inbounds[inbound_index].Settings), &settings)
-			clients, ok := settings["clients"].([]any)
-			if ok {
+			clients, err := inboundClients(settings)
+			if err == nil {
 				var newClients []any
 				for client_index := range clients {
-					c := clients[client_index].(map[string]any)
+					c, err := inboundClientMap(clients[client_index])
+					if err != nil {
+						return nil, err
+					}
 					for traffic_index := range dbClientTraffics {
 						if dbClientTraffics[traffic_index].ExpiryTime < 0 && c["email"] == dbClientTraffics[traffic_index].Email {
-							oldExpiryTime := c["expiryTime"].(float64)
+							oldExpiryTime, ok := c["expiryTime"].(float64)
+							if !ok {
+								continue
+							}
 							newExpiryTime := (time.Now().Unix() * 1000) - int64(oldExpiryTime)
 							c["expiryTime"] = newExpiryTime
 							c["updated_at"] = time.Now().Unix() * 1000
@@ -1564,11 +1604,17 @@ func (s *InboundService) autoRenewClients(tx *gorm.DB) (bool, int64, error) {
 	for inbound_index := range inbounds {
 		settings := map[string]any{}
 		json.Unmarshal([]byte(inbounds[inbound_index].Settings), &settings)
-		clients := settings["clients"].([]any)
+		clients, err := inboundClients(settings)
+		if err != nil {
+			return false, 0, err
+		}
 		for client_index := range clients {
-			c := clients[client_index].(map[string]any)
+			c, err := inboundClientMap(clients[client_index])
+			if err != nil {
+				return false, 0, err
+			}
 			for traffic_index, traffic := range traffics {
-				if traffic.Email == c["email"].(string) {
+				if email, _ := c["email"].(string); traffic.Email == email {
 					newExpiryTime := traffic.ExpiryTime
 					for newExpiryTime < now {
 						newExpiryTime += (int64(traffic.Reset) * 86400000)
@@ -1941,10 +1987,16 @@ func (s *InboundService) SetClientTelegramUserID(trafficId int, tgId int64) (boo
 	if err != nil {
 		return false, err
 	}
-	clients := settings["clients"].([]any)
+	clients, err := inboundClients(settings)
+	if err != nil {
+		return false, err
+	}
 	var newClients []any
 	for client_index := range clients {
-		c := clients[client_index].(map[string]any)
+		c, err := inboundClientMap(clients[client_index])
+		if err != nil {
+			return false, err
+		}
 		if c["email"] == clientEmail {
 			c["tgId"] = tgId
 			c["updated_at"] = time.Now().Unix() * 1000
@@ -2028,10 +2080,16 @@ func (s *InboundService) ToggleClientEnableByEmail(clientEmail string) (bool, bo
 	if err != nil {
 		return false, false, err
 	}
-	clients := settings["clients"].([]any)
+	clients, err := inboundClients(settings)
+	if err != nil {
+		return false, false, err
+	}
 	var newClients []any
 	for client_index := range clients {
-		c := clients[client_index].(map[string]any)
+		c, err := inboundClientMap(clients[client_index])
+		if err != nil {
+			return false, false, err
+		}
 		if c["email"] == clientEmail {
 			c["enable"] = !clientOldEnabled
 			c["updated_at"] = time.Now().Unix() * 1000
@@ -2108,10 +2166,16 @@ func (s *InboundService) ResetClientIpLimitByEmail(clientEmail string, count int
 	if err != nil {
 		return false, err
 	}
-	clients := settings["clients"].([]any)
+	clients, err := inboundClients(settings)
+	if err != nil {
+		return false, err
+	}
 	var newClients []any
 	for client_index := range clients {
-		c := clients[client_index].(map[string]any)
+		c, err := inboundClientMap(clients[client_index])
+		if err != nil {
+			return false, err
+		}
 		if c["email"] == clientEmail {
 			c["limitIp"] = count
 			c["updated_at"] = time.Now().Unix() * 1000
@@ -2167,10 +2231,16 @@ func (s *InboundService) ResetClientExpiryTimeByEmail(clientEmail string, expiry
 	if err != nil {
 		return false, err
 	}
-	clients := settings["clients"].([]any)
+	clients, err := inboundClients(settings)
+	if err != nil {
+		return false, err
+	}
 	var newClients []any
 	for client_index := range clients {
-		c := clients[client_index].(map[string]any)
+		c, err := inboundClientMap(clients[client_index])
+		if err != nil {
+			return false, err
+		}
 		if c["email"] == clientEmail {
 			c["expiryTime"] = expiry_time
 			c["updated_at"] = time.Now().Unix() * 1000
@@ -2229,10 +2299,16 @@ func (s *InboundService) ResetClientTrafficLimitByEmail(clientEmail string, tota
 	if err != nil {
 		return false, err
 	}
-	clients := settings["clients"].([]any)
+	clients, err := inboundClients(settings)
+	if err != nil {
+		return false, err
+	}
 	var newClients []any
 	for client_index := range clients {
-		c := clients[client_index].(map[string]any)
+		c, err := inboundClientMap(clients[client_index])
+		if err != nil {
+			return false, err
+		}
 		if c["email"] == clientEmail {
 			c["totalGB"] = totalGB * 1024 * 1024 * 1024
 			c["updated_at"] = time.Now().Unix() * 1000
@@ -2292,7 +2368,7 @@ func (s *InboundService) ResetClientTraffic(id int, clientEmail string) (bool, e
 					if err != nil {
 						return false, err
 					}
-					cipher = oldSettings["method"].(string)
+					cipher, _ = oldSettings["method"].(string)
 				}
 				err1 := s.xrayApi.AddUser(string(inbound.Protocol), inbound.Tag, map[string]any{
 					"email":    client.Email,
@@ -2428,13 +2504,19 @@ func (s *InboundService) DelDepletedClients(id int) (err error) {
 			return err
 		}
 
-		oldClients := oldSettings["clients"].([]any)
+		oldClients, err := inboundClients(oldSettings)
+		if err != nil {
+			return err
+		}
 		var newClients []any
 		for _, client := range oldClients {
 			deplete := false
-			c := client.(map[string]any)
+			c, err := inboundClientMap(client)
+			if err != nil {
+				return err
+			}
 			for _, email := range emails {
-				if email == c["email"].(string) {
+				if clientEmail, _ := c["email"].(string); email == clientEmail {
 					deplete = true
 					break
 				}
@@ -2833,7 +2915,10 @@ func (s *InboundService) MigrationRequirements() {
 			// Fix Client configuration problems
 			var newClients []any
 			for client_index := range clients {
-				c := clients[client_index].(map[string]any)
+				c, ok := clients[client_index].(map[string]any)
+				if !ok {
+					continue
+				}
 
 				// Add email='' if it is not exists
 				if _, ok := c["email"]; !ok {

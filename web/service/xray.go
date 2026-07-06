@@ -138,7 +138,7 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	}
 
 	xrayConfig := &xray.Config{}
-	err = json.Unmarshal([]byte(templateConfig), xrayConfig)
+	err = json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), xrayConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -270,6 +270,7 @@ func (s *XrayService) RestartXray(isForce bool) error {
 		return err
 	}
 
+	scheduleManagedOutboundRecovery()
 	return nil
 }
 

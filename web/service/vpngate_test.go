@@ -232,3 +232,34 @@ func TestVPNGateStatusStartsFailoverWhenTunDisappears(t *testing.T) {
 		t.Fatalf("failover was not triggered")
 	}
 }
+
+func TestRecoverStaleVPNGateOutboundSkipsBusyState(t *testing.T) {
+	initVPNGateTestLogger()
+
+	vpnGateOpenVPN.Lock()
+	oldID := vpnGateOpenVPN.id
+	oldStatus := cloneOpenVPNStatus(vpnGateOpenVPN.status)
+	vpnGateOpenVPN.id = 2002
+	vpnGateOpenVPN.status = OpenVPNStatus{Phase: "connecting"}
+	vpnGateOpenVPN.Unlock()
+
+	oldTrigger := triggerVPNGateFailoverAsyncHook
+	called := make(chan int64, 1)
+	triggerVPNGateFailoverAsyncHook = func(taskID int64) {
+		called <- taskID
+	}
+	defer func() {
+		triggerVPNGateFailoverAsyncHook = oldTrigger
+		vpnGateOpenVPN.Lock()
+		vpnGateOpenVPN.id = oldID
+		vpnGateOpenVPN.status = oldStatus
+		vpnGateOpenVPN.Unlock()
+	}()
+
+	(&OpenVPNService{}).RecoverStaleVPNGateOutbound()
+	select {
+	case taskID := <-called:
+		t.Fatalf("unexpected duplicate failover for task %d", taskID)
+	default:
+	}
+}

@@ -24,9 +24,34 @@ type WarpService struct {
 }
 
 var (
-	warpMonitorMu      sync.Mutex
-	warpMonitorStopped bool
+	warpMonitorMu sync.Mutex
+	// ponytail: global lock is enough; split per managed outbound if writes become hot.
+	managedOutboundMu sync.Mutex
+	// ponytail: debounce post-restart checks; per-tag scheduling if restarts get noisy.
+	managedRecoveryMu        sync.Mutex
+	managedRecoveryScheduled bool
 )
+
+func scheduleManagedOutboundRecovery() {
+	managedRecoveryMu.Lock()
+	if managedRecoveryScheduled {
+		managedRecoveryMu.Unlock()
+		return
+	}
+	managedRecoveryScheduled = true
+	managedRecoveryMu.Unlock()
+
+	go func() {
+		defer func() {
+			managedRecoveryMu.Lock()
+			managedRecoveryScheduled = false
+			managedRecoveryMu.Unlock()
+		}()
+		time.Sleep(3 * time.Second)
+		(&OpenVPNService{}).RecoverStaleVPNGateOutbound()
+		(&WarpService{}).CheckAndRepairWarp()
+	}()
+}
 
 func (s *WarpService) GetWarpData() (string, error) {
 	warp, err := s.SettingService.GetWarp()
@@ -37,9 +62,6 @@ func (s *WarpService) GetWarpData() (string, error) {
 }
 
 func (s *WarpService) DelWarpData() error {
-	warpMonitorMu.Lock()
-	warpMonitorStopped = false
-	warpMonitorMu.Unlock()
 	err := s.SettingService.SetWarp("")
 	if err != nil {
 		return err
@@ -148,10 +170,9 @@ func (s *WarpService) registerWarp(secretKey string, publicKey string, save bool
 		return "", nil, nil, err
 	}
 	if save {
-		warpMonitorMu.Lock()
-		warpMonitorStopped = false
-		warpMonitorMu.Unlock()
-		s.SettingService.SetWarp(string(warpDataJSON))
+		if err := s.SettingService.SetWarp(string(warpDataJSON)); err != nil {
+			return "", nil, nil, err
+		}
 	}
 
 	result, err := json.Marshal(map[string]any{
@@ -204,8 +225,12 @@ func (s *WarpService) SetWarpLicense(license string) (string, error) {
 	}
 	if response["success"] == false {
 		errorArr, _ := response["errors"].([]any)
-		errorObj := errorArr[0].(map[string]any)
-		return "", common.NewError(errorObj["code"], errorObj["message"])
+		if len(errorArr) > 0 {
+			if errorObj, ok := errorArr[0].(map[string]any); ok {
+				return "", common.NewError(errorObj["code"], errorObj["message"])
+			}
+		}
+		return "", common.NewError("WARP license update failed")
 	}
 
 	warpData["license_key"] = license
@@ -213,10 +238,9 @@ func (s *WarpService) SetWarpLicense(license string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	warpMonitorMu.Lock()
-	warpMonitorStopped = false
-	warpMonitorMu.Unlock()
-	s.SettingService.SetWarp(string(newWarpData))
+	if err := s.SettingService.SetWarp(string(newWarpData)); err != nil {
+		return "", err
+	}
 
 	return string(newWarpData), nil
 }
@@ -224,35 +248,42 @@ func (s *WarpService) SetWarpLicense(license string) (string, error) {
 func (s *WarpService) CheckAndRepairWarp() {
 	warpMonitorMu.Lock()
 	defer warpMonitorMu.Unlock()
-	if warpMonitorStopped {
-		return
-	}
-	if err := s.checkAndRepairWarpLocked(); err != nil {
+	if err := s.checkAndRepairWarpLocked(false); err != nil {
 		logger.Warningf("[WARP] Monitor failed: %v", err)
 	}
 }
 
 func (s *WarpService) RepairWarp() {
 	warpMonitorMu.Lock()
-	warpMonitorStopped = false
-	warpMonitorMu.Unlock()
-	s.CheckAndRepairWarp()
+	defer warpMonitorMu.Unlock()
+	if err := s.checkAndRepairWarpLocked(true); err != nil {
+		logger.Warningf("[WARP] Repair failed: %v", err)
+	}
 }
 
-func (s *WarpService) checkAndRepairWarpLocked() error {
+func (s *WarpService) checkAndRepairWarpLocked(force bool) error {
 	configMap, outbounds, current, err := loadWarpXrayConfig()
-	if err != nil || current == nil {
+	if err != nil {
 		return err
 	}
 
-	if ok, msg := s.testWarpOutbound(current, outbounds); ok {
-		logger.Debugf("[WARP] Monitor check passed: %s", msg)
-		return nil
-	} else if strings.Contains(msg, "Another outbound test") {
-		logger.Infof("[WARP] Monitor skipped: %s", msg)
-		return nil
+	if current == nil {
+		if !xrayReferencesOutbound(configMap, "warp") {
+			return nil
+		}
+		logger.Warning("[WARP] Recovering missing outbound referenced by routing rules")
+	} else if !force {
+		if ok, msg := s.testWarpOutbound(current, outbounds); ok {
+			logger.Debugf("[WARP] Monitor check passed: %s", msg)
+			return nil
+		} else if strings.Contains(msg, "Another outbound test") {
+			logger.Infof("[WARP] Monitor skipped: %s", msg)
+			return nil
+		} else {
+			logger.Warningf("[WARP] Current node failed, trying replacement: %s", msg)
+		}
 	} else {
-		logger.Warningf("[WARP] Current node failed, trying replacement: %s", msg)
+		logger.Warning("[WARP] Outbound test failed, trying replacement")
 	}
 
 	var lastErr string
@@ -274,7 +305,7 @@ func (s *WarpService) checkAndRepairWarpLocked() error {
 		}
 		nextOutbounds := replaceOutboundByTag(outbounds, "warp", candidate)
 		if ok, msg := s.testWarpOutbound(candidate, nextOutbounds); ok {
-			if err := saveWarpReplacement(configMap, nextOutbounds, warpData); err != nil {
+			if err := saveWarpReplacement(candidate, warpData); err != nil {
 				return err
 			}
 			logger.Infof("[WARP] Replaced unusable node after %d attempt(s): %s", i, msg)
@@ -283,8 +314,25 @@ func (s *WarpService) checkAndRepairWarpLocked() error {
 			lastErr = msg
 		}
 	}
-	warpMonitorStopped = true
 	return common.NewErrorf("连续更换 10 次仍不可用，已停止本轮 WARP 自动更换: %s", lastErr)
+}
+
+func xrayReferencesOutbound(configMap map[string]any, tag string) bool {
+	routing, ok := configMap["routing"].(map[string]any)
+	if !ok {
+		return false
+	}
+	rules, ok := routing["rules"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rule := range rules {
+		ruleMap, ok := rule.(map[string]any)
+		if ok && ruleMap["outboundTag"] == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *WarpService) testWarpOutbound(outbound map[string]any, outbounds []any) (bool, string) {
@@ -324,7 +372,7 @@ func loadWarpXrayConfig() (map[string]any, []any, map[string]any, error) {
 		return nil, nil, nil, err
 	}
 	var configMap map[string]any
-	if err := json.Unmarshal([]byte(templateConfig), &configMap); err != nil {
+	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
 		return nil, nil, nil, err
 	}
 	outbounds, _ := configMap["outbounds"].([]any)
@@ -405,31 +453,20 @@ func replaceOutboundByTag(outbounds []any, tag string, replacement map[string]an
 	return append(next, replacement)
 }
 
-func saveWarpReplacement(configMap map[string]any, outbounds []any, warpData map[string]string) error {
+func saveWarpReplacement(warpOutbound map[string]any, warpData map[string]string) error {
 	warpDataJSON, err := json.MarshalIndent(warpData, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := (&SettingService{}).SetWarp(string(warpDataJSON)); err != nil {
-		return err
-	}
 
-	var warpOutbound map[string]any
-	for _, outbound := range outbounds {
-		outboundMap, ok := outbound.(map[string]any)
-		if ok && outboundMap["tag"] == "warp" {
-			warpOutbound = outboundMap
-			break
-		}
-	}
-	if warpOutbound == nil {
-		return common.NewError("warp outbound not found")
-	}
+	managedOutboundMu.Lock()
+	defer managedOutboundMu.Unlock()
 
 	templateConfig, err := (&SettingService{}).GetXrayConfigTemplate()
 	if err != nil {
 		return err
 	}
+	var configMap map[string]any
 	if err := json.Unmarshal([]byte(UnwrapXrayTemplateConfig(templateConfig)), &configMap); err != nil {
 		return err
 	}
@@ -440,6 +477,9 @@ func saveWarpReplacement(configMap map[string]any, outbounds []any, warpData map
 		return err
 	}
 	if err := (&XraySettingService{}).SaveXraySetting(string(newConfigBytes)); err != nil {
+		return err
+	}
+	if err := (&SettingService{}).SetWarp(string(warpDataJSON)); err != nil {
 		return err
 	}
 	return (&XrayService{}).RestartXray(true)

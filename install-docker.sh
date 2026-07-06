@@ -110,6 +110,7 @@ services:
       XRAY_VMESS_AEAD_FORCED: "false"
       XUI_ENABLE_FAIL2BAN: "false"
     tty: true
+    # Xray/WARP/VPNGate need host networking and /dev/net/tun; this intentionally trades container isolation for VPN routing.
     network_mode: host
     cap_add:
       - NET_ADMIN
@@ -411,6 +412,7 @@ is_zh && step 4 6 "写入 Docker Compose 配置" || step 4 6 "Writing Docker Com
 write_compose
 save_installer_copy
 is_zh && step 5 6 "构建并启动容器" || step 5 6 "Building and starting container"
+is_zh && warn "Docker 版会使用 host 网络和 TUN 设备，以支持 Xray/WARP/VPNGate 路由" || warn "Docker uses host network and TUN for Xray/WARP/VPNGate routing"
 compose up -d --build
 is_zh && step 6 6 "写入主机 ml 菜单并初始化面板" || step 6 6 "Writing host ml menu and initializing panel"
 write_host_menu

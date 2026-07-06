@@ -216,13 +216,20 @@
                     '{{ .request_uri }}'
                 ],
                 visible: false,
-                collapsed: JSON.parse(localStorage.getItem(SIDEBAR_COLLAPSED_KEY)),
+                collapsed: this.getStoredCollapsed(),
             }
         },
         methods: {
+            getStoredCollapsed() {
+                try {
+                    return JSON.parse(localStorage.getItem(SIDEBAR_COLLAPSED_KEY)) || false;
+                } catch (_) {
+                    return false;
+                }
+            },
             openLink(key) {
                 return key.startsWith('http') ?
-                    window.open(key) :
+                    window.open(key, '_blank', 'noopener,noreferrer') :
                     location.href = key
             },
             closeDrawer() {
@@ -235,7 +242,7 @@
                 if (type === "clickTrigger") {
                     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed);
 
-                    this.collapsed = JSON.parse(localStorage.getItem(SIDEBAR_COLLAPSED_KEY));
+                    this.collapsed = this.getStoredCollapsed();
                 }
             }
         },

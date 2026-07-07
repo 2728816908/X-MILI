@@ -183,6 +183,9 @@ func (a *XraySettingController) vpngate(c *gin.Context) {
 		err = json.Unmarshal([]byte(c.PostForm("server")), &server)
 		if err == nil {
 			ok, latency := service.TestVPNGateOpenVPN(server)
+			if ok {
+				a.VPNGateService.MarkServerAvailable(server, latency)
+			}
 			resp = map[string]any{"success": ok, "delay": latency}
 		}
 	case "get_settings":

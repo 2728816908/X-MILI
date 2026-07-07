@@ -89,8 +89,17 @@ func warpDial(network, addr string, timeout time.Duration) (net.Conn, error) {
 	go func() { c, e := dialer.Dial(network, addr); ch <- res{c, e} }()
 	select {
 	case r := <-ch:
-		return r.conn, r.err
+		if r.err == nil {
+			return r.conn, nil
+		}
+		return net.DialTimeout(network, addr, timeout)
 	case <-time.After(timeout):
+		go func() {
+			r := <-ch
+			if r.conn != nil {
+				r.conn.Close()
+			}
+		}()
 		return nil, fmt.Errorf("warp dial timeout: %s", addr)
 	}
 }

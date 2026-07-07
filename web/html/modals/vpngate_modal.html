@@ -130,7 +130,7 @@
                                 <span :class="pingClass(server.localPing)">[[ formatPing(server.localPing) ]]</span>
                             </td>
                             <td>
-                                <span :class="pingClass(server.httpLatency)">[[ formatPing(server.httpLatency) ]]</span>
+                                <span :class="pingClass(server.httpLatency)">[[ formatHttpLatency(server.httpLatency) ]]</span>
                             </td>
                             <td>
                                 <a-tag :color="server.ipType === '住宅IP' ? 'green' : (server.ipType === '机房IP' ? 'orange' : 'default')">
@@ -216,12 +216,12 @@
             },
             selectedServers() {
                 if (vpngateModal.ruleMode === 'default') {
-                    return vpngateModal.servers.filter(server => server.localPing >= 0);
+                    return vpngateModal.servers.filter(server => this.isServerAvailable(server));
                 }
                 if (vpngateModal.selectedCountries.length === 0) {
                     return [];
                 }
-                return vpngateModal.servers.filter(server => vpngateModal.selectedCountries.includes(server.countryShort) && server.localPing >= 0);
+                return vpngateModal.servers.filter(server => vpngateModal.selectedCountries.includes(server.countryShort) && this.isServerAvailable(server));
             },
             bestServer() {
                 const pool = this.selectedServers.length > 0 ? this.selectedServers : [];
@@ -253,7 +253,7 @@
                 return vpngateModal.servers.length;
             },
             availableNodeCount() {
-                return vpngateModal.servers.filter(server => server.localPing >= 0).length;
+                return vpngateModal.servers.filter(server => this.isServerAvailable(server)).length;
             },
             failedNodeCount() {
                 return Math.max(0, this.totalNodeCount - this.availableNodeCount);
@@ -410,6 +410,14 @@
                 if (ping < 0) return '超时';
                 if (ping >= 999999) return '未测';
                 return ping + ' ms';
+            },
+            formatHttpLatency(ping) {
+                if (ping < 0) return '未通/未测';
+                return this.formatPing(ping);
+            },
+            isServerAvailable(server) {
+                if (!server) return false;
+                return server.localPing >= 0 || !!server.openVPNConfig;
             },
             pingRank(ping) {
                 return ping < 0 ? Number.MAX_SAFE_INTEGER : ping;

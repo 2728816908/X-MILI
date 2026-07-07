@@ -363,6 +363,7 @@ func (s *OpenVPNService) connectVPNGate(ctx context.Context, taskID int64, serve
 	}
 
 	vpnGateOpenVPN.setTask(taskID, "connecting", 45, fmt.Sprintf("正在尝试连接 [%s - %s]", server.CountryLong, server.IP))
+	connectStarted := time.Now()
 	cmd := exec.CommandContext(ctx, "openvpn", "--config", configPath, "--route-nopull", "--auth-nocache", "--verb", "3")
 	writer := &openVPNLogWriter{}
 	cmd.Stdout = writer
@@ -442,6 +443,7 @@ func (s *OpenVPNService) connectVPNGate(ctx context.Context, taskID int64, serve
 				vpnGateOpenVPN.status.TunDev = tunDev
 				vpnGateOpenVPN.status.Outbound = outbound
 				vpnGateOpenVPN.Unlock()
+				(&VPNGateService{}).MarkServerAvailable(server, time.Since(connectStarted).Milliseconds())
 
 				writer.Lock()
 				writer.closed = true

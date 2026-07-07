@@ -102,6 +102,37 @@ func TestListServersCanIncludeUnavailableFromCache(t *testing.T) {
 	}
 }
 
+func TestMergeVPNGateServerPoolKeepsPreviousAvailableNodes(t *testing.T) {
+	previous := []VPNGateServer{
+		{IP: "1.1.1.1", Proto: "tcp", Port: "443", LocalPing: 50, NumSessions: 1},
+		{IP: "2.2.2.2", Proto: "udp", Port: "1194", LocalPing: 80, NumSessions: 1},
+		{IP: "3.3.3.3", Proto: "tcp", Port: "443", LocalPing: -1},
+	}
+	fresh := []VPNGateServer{
+		{IP: "1.1.1.1", Proto: "tcp", Port: "443", LocalPing: 20, NumSessions: 99},
+		{IP: "4.4.4.4", Proto: "tcp", Port: "443", LocalPing: -1, OpenVPNConfig: "config"},
+	}
+
+	got := mergeVPNGateServerPool(previous, fresh)
+	if len(got) != 3 {
+		t.Fatalf("unexpected pool size: %+v", got)
+	}
+
+	byIP := map[string]VPNGateServer{}
+	for _, server := range got {
+		byIP[server.IP] = server
+	}
+	if byIP["1.1.1.1"].LocalPing != 20 || byIP["1.1.1.1"].NumSessions != 99 {
+		t.Fatalf("fresh server did not replace previous one: %+v", byIP["1.1.1.1"])
+	}
+	if _, ok := byIP["2.2.2.2"]; !ok {
+		t.Fatalf("previous available server was dropped: %+v", got)
+	}
+	if _, ok := byIP["3.3.3.3"]; ok {
+		t.Fatalf("previous unavailable server was kept: %+v", got)
+	}
+}
+
 func TestSanitizeVPNGateOpenVPNConfig(t *testing.T) {
 	raw := "client\nscript-security 2\nup /tmp/pwn\nremote 1.2.3.4 1194\n<ca>\nup is just cert text\n</ca>\n"
 	config := base64.StdEncoding.EncodeToString([]byte(raw))

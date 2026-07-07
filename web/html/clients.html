@@ -94,16 +94,16 @@
               </a-space>
             </template>
             <template slot="inbound" slot-scope="text, row">
-              <a-space direction="vertical" :size="2">
-                <span>[[ row.dbInbound.remark || ('#' + row.dbInbound.id) ]]</span>
-                <span>
-                  <a-tag color="blue">[[ row.dbInbound.protocol ]]</a-tag>
-                  <a-tag>[[ row.dbInbound.port ]]</a-tag>
-                </span>
-              </a-space>
+              <div class="client-inbound-list">
+                <div v-for="item in row.attachments" :key="item.dbInbound.id + '-' + item.client.email" class="client-inbound-item">
+                  <span class="client-inbound-name">[[ item.dbInbound.remark || ('#' + item.dbInbound.id) ]]</span>
+                  <a-tag color="blue">[[ item.dbInbound.protocol ]]</a-tag>
+                  <a-tag>[[ item.dbInbound.port ]]</a-tag>
+                </div>
+              </div>
             </template>
             <template slot="enable" slot-scope="text, row">
-              <a-switch v-model="row.client.enable" @change="state => switchEnableClient(row.dbInbound.id, row.client, state)"></a-switch>
+              <a-switch :checked="row.client.enable" @change="state => switchEnableRow(row, state)"></a-switch>
             </template>
             <template slot="online" slot-scope="text, row">
               <a-popover :overlay-class-name="themeSwitcher.currentTheme">
@@ -118,6 +118,7 @@
                   <div>上传：[[ SizeFormatter.sizeFormat(row.stats ? row.stats.up : 0) ]]</div>
                   <div>下载：[[ SizeFormatter.sizeFormat(row.stats ? row.stats.down : 0) ]]</div>
                   <div v-if="row.stats && row.stats.total > 0">剩余：[[ SizeFormatter.sizeFormat(remainingTraffic(row)) ]]</div>
+                  <div v-if="row.attachments && row.attachments.length > 1">挂载入站：[[ row.attachments.length ]]</div>
                 </template>
                 <div class="client-traffic-cell">
                   <span>[[ SizeFormatter.sizeFormat(usedTraffic(row)) ]]</span>
@@ -130,7 +131,8 @@
               </a-popover>
             </template>
             <template slot="expiryTime" slot-scope="text, row">
-              <a-tag v-if="row.client.expiryTime === 0" color="purple">&infin;</a-tag>
+              <a-tag v-if="row.mixedExpiry" color="orange">多规则</a-tag>
+              <a-tag v-else-if="row.client.expiryTime === 0" color="purple">&infin;</a-tag>
               <a-tag v-else :color="ColorUtils.userExpiryColor(expireDiff, row.client, themeSwitcher.isDarkTheme)">
                 [[ row.client.expiryTime < 0 ? (-row.client.expiryTime / 86400000) + 'd 后启用' : IntlUtil.formatRelativeTime(row.client.expiryTime) ]]
               </a-tag>
@@ -260,10 +262,55 @@
               dbInbound,
               client,
               stats: this.getClientStats(dbInbound, client.email),
+              attachments: [{
+                dbInbound,
+                client,
+                stats: this.getClientStats(dbInbound, client.email),
+              }],
+              mixedExpiry: false,
             });
           });
         });
-        return rows;
+        if (this.filterInboundId) {
+          return rows;
+        }
+        const grouped = new Map();
+        rows.forEach(row => {
+          const key = row.client.email || row.key;
+          if (!grouped.has(key)) {
+            grouped.set(key, {
+              key: `client-${key}`,
+              dbInbound: row.dbInbound,
+              client: Object.assign(Object.create(Object.getPrototypeOf(row.client)), row.client),
+              stats: { up: 0, down: 0, total: 0, expiryTime: 0 },
+              attachments: [],
+              hasUnlimitedTraffic: false,
+              mixedExpiry: false,
+            });
+          }
+          const target = grouped.get(key);
+          target.attachments.push(...row.attachments);
+          target.stats.up += row.stats ? (row.stats.up || 0) : 0;
+          target.stats.down += row.stats ? (row.stats.down || 0) : 0;
+          if (row.stats && row.stats.total > 0 && !target.hasUnlimitedTraffic) {
+            target.stats.total += row.stats.total;
+          } else {
+            target.hasUnlimitedTraffic = true;
+            target.stats.total = 0;
+          }
+        });
+        grouped.forEach(row => {
+          const finiteExpiries = row.attachments
+            .map(item => item.client.expiryTime || 0)
+            .filter(value => value > 0);
+          const distinctExpiries = new Set(row.attachments.map(item => item.client.expiryTime || 0));
+          row.mixedExpiry = distinctExpiries.size > 1;
+          row.client.expiryTime = finiteExpiries.length > 0 ? Math.min(...finiteExpiries) : 0;
+          row.client.enable = row.attachments.every(item => item.client.enable);
+          row.client.comment = row.attachments.find(item => item.client.comment)?.client.comment || row.client.comment;
+          row.stats.expiryTime = row.client.expiryTime;
+        });
+        return Array.from(grouped.values());
       },
       filteredRows() {
         const key = (this.searchKey || '').trim().toLowerCase();
@@ -277,6 +324,11 @@
             row.dbInbound.remark,
             row.dbInbound.protocol,
             String(row.dbInbound.port),
+            ...(row.attachments || []).flatMap(item => [
+              item.dbInbound.remark,
+              item.dbInbound.protocol,
+              String(item.dbInbound.port),
+            ]),
           ].filter(Boolean).join(' ').toLowerCase();
           return haystack.includes(key);
         });
@@ -439,6 +491,20 @@
         const clientId = this.getClientId(dbInbound.protocol, clients[index]);
         await this.updateClient(clients[index], dbInboundId, clientId);
       },
+      async switchEnableRow(row, state) {
+        if (!row.attachments || row.attachments.length <= 1) {
+          await this.switchEnableClient(row.dbInbound.id, row.client, state);
+          return;
+        }
+        this.loading = true;
+        try {
+          for (const item of row.attachments) {
+            await this.switchEnableClient(item.dbInbound.id, item.client, state);
+          }
+        } finally {
+          this.loading = false;
+        }
+      },
       delClient(dbInboundId, client, confirmation = true) {
         const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
         if (!dbInbound) return;
@@ -531,7 +597,7 @@
       },
       clientBadgeColor(row) {
         if (!row.client.enable) return themeSwitcher.isDarkTheme ? '#2c3950' : '#bcbcbc';
-        if (this.isClientDepleted(row.dbInbound, row.client.email)) return '#cf3c3c';
+        if (this.isRowDepleted(row)) return '#cf3c3c';
         if (this.isClientOnline(row.client.email)) return '#008771';
         if (this.isClientExpiring(row)) return '#f37b24';
         return '#008771';
@@ -542,6 +608,12 @@
         const used = (stats.up || 0) + (stats.down || 0);
         const exhausted = (stats.total || 0) > 0 && used >= stats.total;
         const expired = (stats.expiryTime || 0) > 0 && stats.expiryTime <= Date.now();
+        return exhausted || expired;
+      },
+      isRowDepleted(row) {
+        if (!row.stats) return false;
+        const exhausted = (row.stats.total || 0) > 0 && this.usedTraffic(row) >= row.stats.total;
+        const expired = (row.client.expiryTime || 0) > 0 && row.client.expiryTime <= Date.now();
         return exhausted || expired;
       },
       isClientExpiring(row) {
@@ -555,9 +627,9 @@
       rowMatchesStatus(row, status) {
         if (status === 'online') return row.client.enable && this.isClientOnline(row.client.email);
         if (status === 'deactive') return !row.client.enable;
-        if (status === 'depleted') return this.isClientDepleted(row.dbInbound, row.client.email);
+        if (status === 'depleted') return this.isRowDepleted(row);
         if (status === 'expiring') return this.isClientExpiring(row);
-        if (status === 'active') return row.client.enable && !this.isClientDepleted(row.dbInbound, row.client.email);
+        if (status === 'active') return row.client.enable && !this.isRowDepleted(row);
         return true;
       },
       isRemovable(dbInboundId) {
@@ -597,6 +669,28 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .clients-page .client-inbound-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .clients-page .client-inbound-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .clients-page .client-inbound-name {
+    min-width: 44px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .clients-page .client-inbound-item .ant-tag {
+    margin: 0;
   }
   .clients-page .client-traffic-cell {
     display: grid;

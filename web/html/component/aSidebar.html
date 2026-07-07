@@ -9,7 +9,7 @@
                     <div class="sidebar-brand-name">Xray-Aimili</div>
                 </div>
                 <div class="sidebar-brand-actions">
-                    <a-button size="small" icon="github" @click.stop="openLink('https://github.com/Aimilibot/X-MILI')">Github</a-button>
+                    <a-button size="small" icon="github" @click.stop="openLink('https://github.com/2728816908/X-MILI')">Github</a-button>
                     <a-button size="small" @click.stop="openLink('https://t.me/arestemple')">
                         <span class="sidebar-telegram-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" focusable="false">
@@ -39,7 +39,7 @@
                     <div class="sidebar-brand-name">Xray-Aimili</div>
                 </div>
                 <div class="sidebar-brand-actions">
-                    <a-button size="small" icon="github" @click.stop="openLink('https://github.com/Aimilibot/X-MILI')">Github</a-button>
+                    <a-button size="small" icon="github" @click.stop="openLink('https://github.com/2728816908/X-MILI')">Github</a-button>
                     <a-button size="small" @click.stop="openLink('https://t.me/arestemple')">
                         <span class="sidebar-telegram-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" focusable="false">
@@ -167,6 +167,11 @@
                         title: '{{ i18n "menu.inbounds"}}'
                     },
                     {
+                        key: '{{ .base_path }}panel/clients',
+                        icon: 'team',
+                        title: '客户端管理'
+                    },
+                    {
                         key: '{{ .base_path }}panel/settings',
                         icon: 'setting',
                         title: '{{ i18n "menu.settings"}}'
@@ -190,6 +195,11 @@
                         key: '{{ .base_path }}panel/inbounds',
                         icon: 'deployment-unit',
                         title: '订阅节点'
+                    },
+                    {
+                        key: '{{ .base_path }}panel/clients',
+                        icon: 'team',
+                        title: '客户端管理'
                     },
                     {
                         key: '{{ .base_path }}panel/xray?tab=outbounds',

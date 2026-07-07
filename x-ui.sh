@@ -7,7 +7,7 @@ yellow='\033[0;33m'
 plain='\033[0m'
 
 app_name="X-MILI"
-repo_raw_base="${X_MILI_RAW_BASE:=https://raw.githubusercontent.com/Aimilibot/X-MILI/main}"
+repo_raw_base="${X_MILI_RAW_BASE:=https://raw.githubusercontent.com/2728816908/X-MILI/main}"
 lang_file="${X_MILI_LANG_FILE:=/etc/x-mili/lang}"
 
 load_language() {

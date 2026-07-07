@@ -2,8 +2,8 @@
 set -euo pipefail
 
 APP_NAME="X-MILI"
-REPO="https://github.com/Aimilibot/X-MILI"
-API_REPO="https://api.github.com/repos/Aimilibot/X-MILI"
+REPO="https://github.com/2728816908/X-MILI"
+API_REPO="https://api.github.com/repos/2728816908/X-MILI"
 INSTALL_DIR="${XUI_MAIN_FOLDER:-/usr/local/x-ui}"
 COMMIT_FILE="${INSTALL_DIR}/.x-mili-commit"
 RELEASE_TAG="${X_MILI_RELEASE_TAG:-latest}"

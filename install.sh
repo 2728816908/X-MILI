@@ -2,7 +2,7 @@
 set -e
 
 APP_NAME="X-MILI"
-REPO="https://github.com/Aimilibot/X-MILI"
+REPO="https://github.com/2728816908/X-MILI"
 RELEASE_TAG="${X_MILI_RELEASE_TAG:-latest}"
 INSTALL_DIR="${XUI_MAIN_FOLDER:-/usr/local/x-ui}"
 DATA_DIR="/etc/x-ui"

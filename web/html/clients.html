@@ -1,0 +1,626 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<a-layout id="app" v-cloak :class="themeSwitcher.currentTheme + ' clients-page'">
+  <a-sidebar></a-sidebar>
+  <a-layout id="content-layout">
+    <a-layout-content>
+      <a-spin :spinning="loading" :delay="300" tip='{{ i18n "loading"}}' size="large">
+        <a-row :gutter="[isMobile ? 8 : 16, isMobile ? 8 : 12]">
+          <a-col :xs="12" :md="6">
+            <a-card size="small">
+              <a-statistic title="客户端总数" :value="summary.total">
+                <template #prefix><a-icon type="team"></a-icon></template>
+              </a-statistic>
+            </a-card>
+          </a-col>
+          <a-col :xs="12" :md="6">
+            <a-card size="small">
+              <a-statistic title="在线" :value="summary.online.length">
+                <template #prefix><a-icon type="check-circle"></a-icon></template>
+              </a-statistic>
+            </a-card>
+          </a-col>
+          <a-col :xs="12" :md="6">
+            <a-card size="small">
+              <a-statistic title="停用" :value="summary.deactive.length">
+                <template #prefix><a-icon type="pause-circle"></a-icon></template>
+              </a-statistic>
+            </a-card>
+          </a-col>
+          <a-col :xs="12" :md="6">
+            <a-card size="small">
+              <a-statistic title="耗尽/过期" :value="summary.depleted.length">
+                <template #prefix><a-icon type="stop"></a-icon></template>
+              </a-statistic>
+            </a-card>
+          </a-col>
+        </a-row>
+
+        <a-card class="clients-toolbar" size="small">
+          <a-row :gutter="[8, 8]" type="flex" align="middle">
+            <a-col :xs="24" :lg="8">
+              <a-input-search v-model="searchKey" placeholder="搜索邮箱、备注、入站、协议、端口" allow-clear></a-input-search>
+            </a-col>
+            <a-col :xs="24" :sm="12" :lg="5">
+              <a-select v-model="filterInboundId" allow-clear placeholder="全部入站" style="width: 100%;"
+                :dropdown-class-name="themeSwitcher.currentTheme">
+                <a-select-option v-for="item in clientInbounds" :key="item.id" :value="item.id">
+                  [[ item.remark ]] ([[ item.protocol ]]:[[ item.port ]])
+                </a-select-option>
+              </a-select>
+            </a-col>
+            <a-col :xs="24" :sm="12" :lg="5">
+              <a-select v-model="filterStatus" placeholder="全部状态" style="width: 100%;"
+                :dropdown-class-name="themeSwitcher.currentTheme">
+                <a-select-option value="">全部状态</a-select-option>
+                <a-select-option value="active">可用</a-select-option>
+                <a-select-option value="online">在线</a-select-option>
+                <a-select-option value="deactive">停用</a-select-option>
+                <a-select-option value="depleted">耗尽/过期</a-select-option>
+                <a-select-option value="expiring">即将耗尽/过期</a-select-option>
+              </a-select>
+            </a-col>
+            <a-col :xs="24" :lg="6">
+              <a-space class="clients-actions" :style="{ width: '100%', justifyContent: isMobile ? 'flex-start' : 'flex-end' }">
+                <a-select v-model="addInboundId" placeholder="选择入站" style="width: 180px;"
+                  :dropdown-class-name="themeSwitcher.currentTheme">
+                  <a-select-option v-for="item in clientInbounds" :key="item.id" :value="item.id">
+                    [[ item.remark ]]
+                  </a-select-option>
+                </a-select>
+                <a-button type="primary" icon="plus" :disabled="!addInboundId" @click="openAddClient(addInboundId)">
+                  添加客户端
+                </a-button>
+                <a-button icon="sync" :loading="refreshing" @click="manualRefresh"></a-button>
+              </a-space>
+            </a-col>
+          </a-row>
+        </a-card>
+
+        <a-card size="small">
+          <a-table :columns="isMobile ? mobileColumns : columns" :data-source="filteredRows"
+            :row-key="row => row.key" :pagination="pagination(filteredRows)" :scroll="isMobile ? {} : { x: 1120 }"
+            :locale="{ emptyText: '{{ i18n "noData" }}' }">
+            <template slot="client" slot-scope="text, row">
+              <a-space direction="horizontal" :size="4">
+                <a-badge :class="isClientOnline(row.client.email) ? 'online-animation' : ''"
+                  :color="clientBadgeColor(row)"></a-badge>
+                <a-space direction="vertical" :size="1">
+                  <span class="client-email">[[ row.client.email ]]</span>
+                  <span v-if="row.client.comment" class="client-comment">[[ row.client.comment ]]</span>
+                </a-space>
+              </a-space>
+            </template>
+            <template slot="inbound" slot-scope="text, row">
+              <a-space direction="vertical" :size="2">
+                <span>[[ row.dbInbound.remark || ('#' + row.dbInbound.id) ]]</span>
+                <span>
+                  <a-tag color="blue">[[ row.dbInbound.protocol ]]</a-tag>
+                  <a-tag>[[ row.dbInbound.port ]]</a-tag>
+                </span>
+              </a-space>
+            </template>
+            <template slot="enable" slot-scope="text, row">
+              <a-switch v-model="row.client.enable" @change="state => switchEnableClient(row.dbInbound.id, row.client, state)"></a-switch>
+            </template>
+            <template slot="online" slot-scope="text, row">
+              <a-popover :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="content">最后在线：[[ formatLastOnline(row.client.email) ]]</template>
+                <a-tag v-if="row.client.enable && isClientOnline(row.client.email)" color="green">在线</a-tag>
+                <a-tag v-else>离线</a-tag>
+              </a-popover>
+            </template>
+            <template slot="traffic" slot-scope="text, row">
+              <a-popover :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="content">
+                  <div>上传：[[ SizeFormatter.sizeFormat(row.stats ? row.stats.up : 0) ]]</div>
+                  <div>下载：[[ SizeFormatter.sizeFormat(row.stats ? row.stats.down : 0) ]]</div>
+                  <div v-if="row.stats && row.stats.total > 0">剩余：[[ SizeFormatter.sizeFormat(remainingTraffic(row)) ]]</div>
+                </template>
+                <div class="client-traffic-cell">
+                  <span>[[ SizeFormatter.sizeFormat(usedTraffic(row)) ]]</span>
+                  <a-progress :percent="trafficProgress(row)" :show-info="false"
+                    :status="isClientDepleted(row.dbInbound, row.client.email) ? 'exception' : ''"
+                    :stroke-color="clientStatsColor(row.dbInbound, row.client.email)"></a-progress>
+                  <span v-if="row.stats && row.stats.total > 0">[[ SizeFormatter.sizeFormat(row.stats.total) ]]</span>
+                  <span v-else>&infin;</span>
+                </div>
+              </a-popover>
+            </template>
+            <template slot="expiryTime" slot-scope="text, row">
+              <a-tag v-if="row.client.expiryTime === 0" color="purple">&infin;</a-tag>
+              <a-tag v-else :color="ColorUtils.userExpiryColor(expireDiff, row.client, themeSwitcher.isDarkTheme)">
+                [[ row.client.expiryTime < 0 ? (-row.client.expiryTime / 86400000) + 'd 后启用' : IntlUtil.formatRelativeTime(row.client.expiryTime) ]]
+              </a-tag>
+            </template>
+            <template slot="actions" slot-scope="text, row">
+              <a-space :size="12">
+                <a-tooltip title="二维码">
+                  <a-icon v-if="row.dbInbound.hasLink()" class="normal-icon" type="qrcode" @click="showQrcode(row.dbInbound.id, row.client)"></a-icon>
+                </a-tooltip>
+                <a-tooltip title="编辑">
+                  <a-icon class="normal-icon" type="edit" @click="openEditClient(row.dbInbound.id, row.client)"></a-icon>
+                </a-tooltip>
+                <a-tooltip title="详情">
+                  <a-icon class="normal-icon" type="info-circle" @click="showInfo(row.dbInbound.id, row.client)"></a-icon>
+                </a-tooltip>
+                <a-popconfirm title="确定重置该客户端流量？" ok-text="重置" cancel-text="取消"
+                  :overlay-class-name="themeSwitcher.currentTheme"
+                  @confirm="resetClientTraffic(row.client, row.dbInbound.id, false)">
+                  <a-icon class="normal-icon" type="retweet"></a-icon>
+                </a-popconfirm>
+                <a-popconfirm title="确定删除该客户端？" ok-text="删除" ok-type="danger" cancel-text="取消"
+                  :overlay-class-name="themeSwitcher.currentTheme"
+                  @confirm="delClient(row.dbInbound.id, row.client, false)">
+                  <a-icon v-if="isRemovable(row.dbInbound.id)" class="delete-icon" type="delete"></a-icon>
+                </a-popconfirm>
+              </a-space>
+            </template>
+            <template slot="mobileActions" slot-scope="text, row">
+              <a-dropdown :trigger="['click']">
+                <a-icon type="ellipsis" :style="{ fontSize: '20px' }"></a-icon>
+                <a-menu slot="overlay" :theme="themeSwitcher.currentTheme">
+                  <a-menu-item v-if="row.dbInbound.hasLink()" @click="showQrcode(row.dbInbound.id, row.client)">
+                    <a-icon type="qrcode"></a-icon> 二维码
+                  </a-menu-item>
+                  <a-menu-item @click="openEditClient(row.dbInbound.id, row.client)">
+                    <a-icon type="edit"></a-icon> 编辑
+                  </a-menu-item>
+                  <a-menu-item @click="showInfo(row.dbInbound.id, row.client)">
+                    <a-icon type="info-circle"></a-icon> 详情
+                  </a-menu-item>
+                  <a-menu-item @click="resetClientTraffic(row.client, row.dbInbound.id)">
+                    <a-icon type="retweet"></a-icon> 重置流量
+                  </a-menu-item>
+                  <a-menu-item v-if="isRemovable(row.dbInbound.id)" @click="delClient(row.dbInbound.id, row.client)">
+                    <a-icon type="delete"></a-icon> <span style="color:#ff4d4f">删除</span>
+                  </a-menu-item>
+                </a-menu>
+              </a-dropdown>
+            </template>
+          </a-table>
+        </a-card>
+      </a-spin>
+    </a-layout-content>
+  </a-layout>
+</a-layout>
+
+{{template "page/body_scripts" .}}
+<script src="{{ .base_path }}assets/qrcode/qrious2.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/uri/URI.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/reality_targets.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/inbound.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/dbinbound.js?{{ .cur_ver }}"></script>
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "component/aPersianDatepicker" .}}
+{{template "modals/qrcodeModal" .}}
+{{template "modals/inboundInfoModal" .}}
+{{template "modals/clientsModal" .}}
+<script>
+  const columns = [
+    { title: '客户端', width: 220, scopedSlots: { customRender: 'client' } },
+    { title: '入站', width: 180, scopedSlots: { customRender: 'inbound' } },
+    { title: '启用', width: 72, align: 'center', scopedSlots: { customRender: 'enable' } },
+    { title: '在线', width: 88, align: 'center', scopedSlots: { customRender: 'online' } },
+    { title: '流量', width: 260, scopedSlots: { customRender: 'traffic' } },
+    { title: '到期', width: 160, align: 'center', scopedSlots: { customRender: 'expiryTime' } },
+    { title: '操作', width: 180, align: 'center', scopedSlots: { customRender: 'actions' } },
+  ];
+  const mobileColumns = [
+    { title: '', width: 32, align: 'center', scopedSlots: { customRender: 'mobileActions' } },
+    { title: '客户端', scopedSlots: { customRender: 'client' } },
+    { title: '状态', width: 76, align: 'center', scopedSlots: { customRender: 'online' } },
+  ];
+
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    mixins: [MediaQueryMixin],
+    data: {
+      themeSwitcher,
+      persianDatepicker,
+      columns,
+      mobileColumns,
+      loading: false,
+      refreshing: false,
+      dbInbounds: [],
+      onlineClients: [],
+      lastOnlineMap: {},
+      searchKey: '',
+      filterStatus: '',
+      filterInboundId: undefined,
+      addInboundId: undefined,
+      expireDiff: 0,
+      trafficDiff: 0,
+      pageSize: 0,
+      remarkModel: '-ieo',
+      datepicker: 'gregorian',
+      ipLimitEnable: false,
+      subSettings: {
+        enable: false,
+        subURI: '',
+        subJsonURI: '',
+        subJsonEnable: false,
+      },
+    },
+    computed: {
+      clientInbounds() {
+        return this.dbInbounds.filter(row => typeof row.isMultiUser === 'function' && row.isMultiUser());
+      },
+      clientRows() {
+        const rows = [];
+        this.clientInbounds.forEach(dbInbound => {
+          const clients = this.getInboundClients(dbInbound) || [];
+          clients.forEach(client => {
+            rows.push({
+              key: `${dbInbound.id}-${this.getClientId(dbInbound.protocol, client)}-${client.email}`,
+              dbInbound,
+              client,
+              stats: this.getClientStats(dbInbound, client.email),
+            });
+          });
+        });
+        return rows;
+      },
+      filteredRows() {
+        const key = (this.searchKey || '').trim().toLowerCase();
+        return this.clientRows.filter(row => {
+          if (this.filterInboundId && row.dbInbound.id !== this.filterInboundId) return false;
+          if (this.filterStatus && !this.rowMatchesStatus(row, this.filterStatus)) return false;
+          if (!key) return true;
+          const haystack = [
+            row.client.email,
+            row.client.comment,
+            row.dbInbound.remark,
+            row.dbInbound.protocol,
+            String(row.dbInbound.port),
+          ].filter(Boolean).join(' ').toLowerCase();
+          return haystack.includes(key);
+        });
+      },
+      summary() {
+        const result = { total: 0, active: 0, online: [], deactive: [], depleted: [], expiring: [] };
+        this.clientRows.forEach(row => {
+          result.total += 1;
+          if (!row.client.enable) {
+            result.deactive.push(row.client.email);
+          } else if (this.isClientDepleted(row.dbInbound, row.client.email)) {
+            result.depleted.push(row.client.email);
+          } else if (this.isClientExpiring(row)) {
+            result.expiring.push(row.client.email);
+          } else {
+            result.active += 1;
+          }
+          if (row.client.enable && this.isClientOnline(row.client.email)) {
+            result.online.push(row.client.email);
+          }
+        });
+        return result;
+      },
+    },
+    methods: {
+      async init() {
+        this.loading = true;
+        try {
+          await this.getDefaultSettings();
+          await this.getDBInbounds();
+        } finally {
+          this.loading = false;
+        }
+      },
+      async getDBInbounds() {
+        this.refreshing = true;
+        try {
+          const msg = await HttpUtil.get('/panel/api/inbounds/list');
+          if (!msg.success) return;
+          await this.getLastOnlineMap();
+          await this.getOnlineUsers();
+          this.dbInbounds = (msg.obj || []).map(item => new DBInbound(item));
+          if (!this.addInboundId && this.clientInbounds.length > 0) {
+            this.addInboundId = this.clientInbounds[0].id;
+          }
+        } finally {
+          this.refreshing = false;
+        }
+      },
+      async getOnlineUsers() {
+        const msg = await HttpUtil.post('/panel/api/inbounds/onlines');
+        if (msg.success) this.onlineClients = msg.obj || [];
+      },
+      async getLastOnlineMap() {
+        const msg = await HttpUtil.post('/panel/api/inbounds/lastOnline');
+        if (msg.success) this.lastOnlineMap = msg.obj || {};
+      },
+      async getDefaultSettings() {
+        const msg = await HttpUtil.post('/panel/setting/defaultSettings');
+        if (!msg.success) return;
+        const settings = msg.obj || {};
+        this.expireDiff = (settings.expireDiff || 0) * 86400000;
+        this.trafficDiff = (settings.trafficDiff || 0) * 1073741824;
+        this.pageSize = settings.pageSize || 0;
+        this.remarkModel = settings.remarkModel || '-ieo';
+        this.datepicker = settings.datepicker || 'gregorian';
+        this.ipLimitEnable = settings.ipLimitEnable === true;
+        this.subSettings = {
+          enable: settings.subEnable,
+          subURI: settings.subURI,
+          subJsonURI: settings.subJsonURI,
+          subJsonEnable: settings.subJsonEnable,
+        };
+      },
+      async manualRefresh() {
+        await this.getDBInbounds();
+      },
+      getInboundClients(dbInbound) {
+        if (!dbInbound) return null;
+        const inbound = dbInbound.toInbound();
+        return inbound && inbound.clients ? inbound.clients : null;
+      },
+      getClientStats(dbInbound, email) {
+        if (!dbInbound || !Array.isArray(dbInbound.clientStats)) return null;
+        return dbInbound.getClientStats(email) || null;
+      },
+      getClientId(protocol, client) {
+        switch (protocol) {
+          case Protocols.TROJAN:
+            return client.password;
+          case Protocols.SHADOWSOCKS:
+            return client.email;
+          case Protocols.HYSTERIA:
+            return client.auth;
+          default:
+            return client.id;
+        }
+      },
+      findIndexOfClient(protocol, clients, client) {
+        if (!clients || !Array.isArray(clients) || !client) return -1;
+        switch (protocol) {
+          case Protocols.TROJAN:
+          case Protocols.SHADOWSOCKS:
+            return clients.findIndex(item => item && item.password === client.password && item.email === client.email);
+          default:
+            return clients.findIndex(item => item && item.id === client.id && item.email === client.email);
+        }
+      },
+      openAddClient(dbInboundId) {
+        const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
+        if (!dbInbound) return;
+        clientModal.show({
+          title: '添加客户端',
+          okText: '添加',
+          dbInbound,
+          confirm: async (client, id) => {
+            await this.addClient(client, id, clientModal);
+          },
+          isEdit: false,
+        });
+      },
+      openEditClient(dbInboundId, client) {
+        const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
+        if (!dbInbound) return;
+        clients = this.getInboundClients(dbInbound);
+        const index = this.findIndexOfClient(dbInbound.protocol, clients, client);
+        if (index < 0) return;
+        clientModal.show({
+          title: '编辑客户端',
+          okText: '更新',
+          dbInbound,
+          index,
+          confirm: async (nextClient, id, clientId) => {
+            clientModal.loading();
+            await this.updateClient(nextClient, id, clientId);
+            clientModal.close();
+          },
+          isEdit: true,
+        });
+      },
+      async addClient(client, dbInboundId, modal) {
+        await this.submit('/panel/api/inbounds/addClient', {
+          id: dbInboundId,
+          settings: '{"clients": [' + client.toString() + ']}',
+        }, modal);
+      },
+      async updateClient(client, dbInboundId, clientId) {
+        await this.submit(`/panel/api/inbounds/updateClient/${clientId}`, {
+          id: dbInboundId,
+          settings: '{"clients": [' + client.toString() + ']}',
+        }, clientModal);
+      },
+      async switchEnableClient(dbInboundId, client, state) {
+        const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
+        if (!dbInbound) return;
+        const clients = this.getInboundClients(dbInbound);
+        const index = this.findIndexOfClient(dbInbound.protocol, clients, client);
+        if (index < 0) return;
+        clients[index].enable = typeof state === 'boolean' ? state : !!client.enable;
+        const clientId = this.getClientId(dbInbound.protocol, clients[index]);
+        await this.updateClient(clients[index], dbInboundId, clientId);
+      },
+      delClient(dbInboundId, client, confirmation = true) {
+        const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
+        if (!dbInbound) return;
+        const clientId = this.getClientId(dbInbound.protocol, client);
+        const run = () => this.submit(`/panel/api/inbounds/${dbInboundId}/delClient/${clientId}`);
+        if (!confirmation) return run();
+        this.$confirm({
+          title: '删除客户端 ' + client.email,
+          content: '确定删除该客户端？',
+          class: themeSwitcher.currentTheme,
+          okText: '删除',
+          okType: 'danger',
+          cancelText: '取消',
+          onOk: run,
+        });
+      },
+      resetClientTraffic(client, dbInboundId, confirmation = true) {
+        const run = () => this.submit(`/panel/api/inbounds/${dbInboundId}/resetClientTraffic/${client.email}`);
+        if (!confirmation) return run();
+        this.$confirm({
+          title: '重置流量 ' + client.email,
+          content: '确定重置该客户端流量？',
+          class: themeSwitcher.currentTheme,
+          okText: '重置',
+          cancelText: '取消',
+          onOk: run,
+        });
+      },
+      async submit(url, data, modal) {
+        const msg = await HttpUtil.postWithModal(url, data, modal);
+        if (msg.success) await this.getDBInbounds();
+      },
+      checkFallback(dbInbound) {
+        const newDbInbound = new DBInbound(dbInbound);
+        if (dbInbound.listen && dbInbound.listen.startsWith("@")) {
+          const rootInbound = this.dbInbounds.map(row => row.toInbound()).find((i) =>
+            i.isTcp && ['trojan', 'vless'].includes(i.protocol) &&
+            i.settings.fallbacks.find(f => f.dest === dbInbound.listen)
+          );
+          if (rootInbound) {
+            newDbInbound.listen = rootInbound.listen;
+            newDbInbound.port = rootInbound.port;
+            const newInbound = newDbInbound.toInbound();
+            newInbound.stream.security = rootInbound.stream.security;
+            newInbound.stream.tls = rootInbound.stream.tls;
+            newInbound.stream.externalProxy = rootInbound.stream.externalProxy;
+            newDbInbound.streamSettings = newInbound.stream.toString();
+          }
+        }
+        return newDbInbound;
+      },
+      showQrcode(dbInboundId, client) {
+        const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
+        if (!dbInbound) return;
+        qrModal.show('二维码', this.checkFallback(dbInbound), client);
+      },
+      showInfo(dbInboundId, client) {
+        const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
+        if (!dbInbound) return;
+        const clients = this.getInboundClients(dbInbound);
+        let index = this.findIndexOfClient(dbInbound.protocol, clients, client);
+        if (index < 0) index = 0;
+        infoModal.show(this.checkFallback(dbInbound), index);
+      },
+      isClientOnline(email) {
+        return this.onlineClients.includes(email);
+      },
+      getLastOnline(email) {
+        return this.lastOnlineMap[email] || null;
+      },
+      formatLastOnline(email) {
+        const ts = this.getLastOnline(email);
+        if (!ts) return '-';
+        return IntlUtil && IntlUtil.formatDate ? IntlUtil.formatDate(ts) : new Date(ts).toLocaleString();
+      },
+      usedTraffic(row) {
+        return row.stats ? (row.stats.up || 0) + (row.stats.down || 0) : 0;
+      },
+      remainingTraffic(row) {
+        if (!row.stats || !row.stats.total) return 0;
+        return Math.max(row.stats.total - this.usedTraffic(row), 0);
+      },
+      trafficProgress(row) {
+        if (!row.stats || row.stats.total === 0) return 100;
+        return Math.min(100, 100 * this.usedTraffic(row) / row.stats.total);
+      },
+      clientStatsColor(dbInbound, email) {
+        const stats = this.getClientStats(dbInbound, email);
+        return ColorUtils.clientUsageColor(stats, this.trafficDiff);
+      },
+      clientBadgeColor(row) {
+        if (!row.client.enable) return themeSwitcher.isDarkTheme ? '#2c3950' : '#bcbcbc';
+        if (this.isClientDepleted(row.dbInbound, row.client.email)) return '#cf3c3c';
+        if (this.isClientOnline(row.client.email)) return '#008771';
+        if (this.isClientExpiring(row)) return '#f37b24';
+        return '#008771';
+      },
+      isClientDepleted(dbInbound, email) {
+        const stats = this.getClientStats(dbInbound, email);
+        if (!stats) return false;
+        const used = (stats.up || 0) + (stats.down || 0);
+        const exhausted = (stats.total || 0) > 0 && used >= stats.total;
+        const expired = (stats.expiryTime || 0) > 0 && stats.expiryTime <= Date.now();
+        return exhausted || expired;
+      },
+      isClientExpiring(row) {
+        const stats = row.stats;
+        if (!stats || !row.client.enable) return false;
+        const used = (stats.up || 0) + (stats.down || 0);
+        const nearLimit = (stats.total || 0) > 0 && stats.total - used < this.trafficDiff;
+        const nearExpiry = (stats.expiryTime || 0) > 0 && stats.expiryTime - Date.now() < this.expireDiff;
+        return nearLimit || nearExpiry;
+      },
+      rowMatchesStatus(row, status) {
+        if (status === 'online') return row.client.enable && this.isClientOnline(row.client.email);
+        if (status === 'deactive') return !row.client.enable;
+        if (status === 'depleted') return this.isClientDepleted(row.dbInbound, row.client.email);
+        if (status === 'expiring') return this.isClientExpiring(row);
+        if (status === 'active') return row.client.enable && !this.isClientDepleted(row.dbInbound, row.client.email);
+        return true;
+      },
+      isRemovable(dbInboundId) {
+        const dbInbound = this.dbInbounds.find(row => row.id === dbInboundId);
+        const clients = this.getInboundClients(dbInbound);
+        return clients && clients.length > 1;
+      },
+      pagination(rows) {
+        if (this.pageSize > 0 && rows.length > this.pageSize) {
+          return {
+            showSizeChanger: true,
+            size: 'small',
+            pageSize: this.pageSize,
+            pageSizeOptions: [String(this.pageSize), String(this.pageSize * 2), String(this.pageSize * 5), String(rows.length)],
+          };
+        }
+        return rows.length > 50 ? { pageSize: 50, showSizeChanger: true } : false;
+      },
+    },
+    mounted() {
+      this.init();
+    },
+  });
+</script>
+<style>
+  .clients-page .clients-toolbar {
+    margin: 12px 0;
+  }
+  .clients-page .client-email {
+    font-weight: 600;
+    word-break: break-all;
+  }
+  .clients-page .client-comment {
+    max-width: 220px;
+    color: var(--color-text-2);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .clients-page .client-traffic-cell {
+    display: grid;
+    grid-template-columns: 76px minmax(90px, 1fr) 76px;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .clients-page .client-traffic-cell .ant-progress {
+    min-width: 0;
+  }
+  .clients-page .normal-icon,
+  .clients-page .delete-icon {
+    cursor: pointer;
+    font-size: 18px;
+  }
+  .clients-page .delete-icon {
+    color: #ff4d4f;
+  }
+  @media (max-width: 768px) {
+    .clients-page .client-comment {
+      max-width: 160px;
+    }
+  }
+</style>
+{{ template "page/body_end" .}}

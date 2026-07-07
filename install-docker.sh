@@ -2,8 +2,8 @@
 set -euo pipefail
 
 APP_NAME="X-MILI"
-REPO="https://github.com/Aimilibot/X-MILI"
-RAW_BASE="https://raw.githubusercontent.com/Aimilibot/X-MILI/main"
+REPO="https://github.com/2728816908/X-MILI"
+RAW_BASE="https://raw.githubusercontent.com/2728816908/X-MILI/main"
 INSTALL_ROOT="${X_MILI_DOCKER_ROOT:-/opt/x-mili-docker}"
 SRC_DIR="${X_MILI_DOCKER_SOURCE_DIR:-${INSTALL_ROOT}/src}"
 DATA_DIR="${X_MILI_DOCKER_DATA_DIR:-/etc/x-ui}"
@@ -243,7 +243,7 @@ set -euo pipefail
 ROOT="/opt/x-mili-docker"
 COMPOSE_FILE="${ROOT}/docker-compose.yml"
 CONTAINER="ml_app"
-RAW_INSTALL="https://raw.githubusercontent.com/Aimilibot/X-MILI/main/install-docker.sh"
+RAW_INSTALL="https://raw.githubusercontent.com/2728816908/X-MILI/main/install-docker.sh"
 
 green='\033[0;32m'
 yellow='\033[0;33m'

@@ -2,7 +2,7 @@
 
 > 基于 3X-UI 精简改造的 Xray 面板，内置 VPNGate 公益节点出站，适合想快速搭建、分流和管理代理节点的 VPS 用户。
 
-[![GitHub](https://img.shields.io/badge/GitHub-X--MILI-black?style=for-the-badge&logo=github)](https://github.com/Aimilibot/X-MILI)
+[![GitHub](https://img.shields.io/badge/GitHub-X--MILI-black?style=for-the-badge&logo=github)](https://github.com/2728816908/X-MILI)
 [![一键安装](https://img.shields.io/badge/一键安装-Linux_VPS-brightgreen?style=for-the-badge)](#一键安装)
 [![Docker](https://img.shields.io/badge/Docker-支持-blue?style=for-the-badge&logo=docker)](#docker-版)
 [![Telegram](https://img.shields.io/badge/TG交流群-arestemple-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/arestemple)
@@ -44,7 +44,7 @@ X-MILI 是一个简洁版代理面板：
 | 适合场景 | 长期运行、生产使用、路由稳定优先 |
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/Aimilibot/X-MILI/main/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/2728816908/X-MILI/main/install.sh)
 ```
 
 ### Docker 版
@@ -58,7 +58,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/Aimilibot/X-MILI/main/install.
 | 适合场景 | 快速重装、容器管理、测试环境 |
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/Aimilibot/X-MILI/main/install-docker.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/2728816908/X-MILI/main/install-docker.sh)
 ```
 
 安装完成后，终端会输出面板地址、账号、密码和安全路径。
